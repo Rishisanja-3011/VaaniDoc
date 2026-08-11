@@ -1,10 +1,18 @@
 from fastapi import FastAPI
 
+from app.api.auth import router as auth_router
+from app.api.doctors import router as doctors_router
+
+
 app = FastAPI(
     title="VaaniDoc API",
     description="Multilingual AI Health Intake System for Rural Clinics",
-    version="0.1.0",
+    version="0.2.0",
 )
+
+
+app.include_router(auth_router)
+app.include_router(doctors_router)
 
 
 @app.get("/health")
