@@ -1,9 +1,10 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.services.translation import translate_and_normalize
-from app.services.symptom_extraction import extract_symptoms
-from app.services.urgency import classify_urgency
+from app.services.ai_service import (
+    AIProcessingError,
+    process_patient_text,
+)
 
 
 router = APIRouter(
@@ -20,6 +21,7 @@ class ProcessTextRequest(BaseModel):
 class EnglishIntake(BaseModel):
     chief_complaint: str
     symptoms: list[str]
+    negative_symptoms: list[str]
     duration: str
     relevant_history: list[str]
     medications: list[str]
@@ -36,34 +38,22 @@ class ClinicalIntake(BaseModel):
 
 @router.post("/text", response_model=ClinicalIntake)
 async def process_text(request: ProcessTextRequest):
-    normalized_text = translate_and_normalize(
-        request.text,
-        request.language,
-    )
+    try:
+        result = process_patient_text(
+            text=request.text,
+            language=request.language,
+        )
 
-    extracted = extract_symptoms(normalized_text)
+        return ClinicalIntake(**result)
 
-    urgency = classify_urgency(
-        normalized_text,
-        extracted,
-    )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
 
-    return ClinicalIntake(
-        language=request.language,
-        english_intake=EnglishIntake(
-            chief_complaint=extracted["chief_complaint"],
-            symptoms=extracted["symptoms"],
-            duration=extracted["duration"],
-            relevant_history=extracted["relevant_history"],
-            medications=extracted["medications"],
-            allergies=extracted["allergies"],
-        ),
-        possible_symptom_categories=extracted[
-            "possible_symptom_categories"
-        ],
-        urgency=urgency["urgency"],
-        confidence={
-            "symptoms": extracted["confidence"],
-            "urgency": urgency["confidence"],
-        },
-    )
+    except AIProcessingError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+        ) from exc
