@@ -24,6 +24,7 @@ class DoctorAuthResponse(BaseModel):
     doctor_id: str | None = None
     doctor_code: str | None = None
     access_token: str | None = None
+    qr_value: str | None = None
 
 
 @router.post(
