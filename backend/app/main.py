@@ -1,16 +1,19 @@
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI
 
 from app.api.auth import router as auth_router
 from app.api.doctors import router as doctors_router
-from app.api.sessions import router as sessions_router
 from app.api.processing import router as processing_router
-
+from app.api.sessions import router as sessions_router
 
 
 app = FastAPI(
     title="VaaniDoc API",
     description="Multilingual AI Health Intake System for Rural Clinics",
-    version="0.2.0",
+    version="0.4.0",
 )
 
 
