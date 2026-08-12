@@ -1,10 +1,12 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parents[3]
+load_dotenv(BASE_DIR / ".env")
 
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
