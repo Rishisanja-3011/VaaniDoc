@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter,Depends, HTTPException, status
 from pydantic import BaseModel, Field
-
+from app.core.auth import get_current_user
+from app.core.supabase import supabase_admin
 from app.services.session_service import (
     create_session,
     delete_session,
@@ -16,17 +17,36 @@ router = APIRouter(
 )
 
 
-class CreateSessionRequest(BaseModel):
-    doctor_id: str = Field(min_length=1)
+
 
 
 class PatientInputRequest(BaseModel):
-    text: str = Field(min_length=1)
+
+     text: str = Field(min_length=1)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_consultation_session(request: CreateSessionRequest):
-    return create_session(request.doctor_id)
+async def create_consultation_session(
+    user=Depends(get_current_user),
+):
+    doctor_response = (
+        supabase_admin
+        .table("doctors")
+        .select("id")
+        .eq("auth_user_id", user.id)
+        .limit(1)
+        .execute()
+    )
+
+    if not doctor_response.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Doctor profile not found.",
+        )
+
+    doctor_id = doctor_response.data[0]["id"]
+
+    return create_session(doctor_id)
 
 
 @router.get("/{session_id}")
