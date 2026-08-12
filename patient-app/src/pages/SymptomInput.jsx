@@ -157,8 +157,15 @@ export default function SymptomInput() {
             lang={language}
           />
           {textError && <p style={s.errorText}>{textError}</p>}
-          <button style={s.primaryBtn} onClick={handleTextContinue}>
-            Review & Submit <ArrowRight size={16} />
+          <button
+            style={s.primaryBtn}
+            onClick={handleTextContinue}
+            onMouseEnter={e => Object.assign(e.currentTarget.style, { background: '#1d4ed8', boxShadow: '0 4px 14px rgba(37,99,235,0.35)' })}
+            onMouseLeave={e => Object.assign(e.currentTarget.style, { background: '#2563eb', boxShadow: '0 2px 8px rgba(37,99,235,0.25)' })}
+            onMouseDown={e => Object.assign(e.currentTarget.style, { transform: 'translateY(1px)', boxShadow: '0 1px 4px rgba(37,99,235,0.2)' })}
+            onMouseUp={e => Object.assign(e.currentTarget.style, { transform: 'translateY(0)', boxShadow: '0 4px 14px rgba(37,99,235,0.35)' })}
+          >
+            Review &amp; Submit <ArrowRight size={16} />
           </button>
         </div>
       )}
@@ -256,8 +263,11 @@ const s = {
   errorText: { margin: 0, fontSize: 13, color: '#ef4444', textAlign: 'center' },
   primaryBtn: {
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-    padding: '13px', borderRadius: 10, border: 'none',
-    background: 'var(--accent)', color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer',
+    padding: '13px 20px', borderRadius: 10, border: 'none',
+    background: '#2563eb', color: '#ffffff',
+    fontSize: 15, fontWeight: 600, cursor: 'pointer',
+    boxShadow: '0 2px 8px rgba(37,99,235,0.25)',
+    transition: 'background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease',
   },
   secondaryBtn: {
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,

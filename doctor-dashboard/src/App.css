@@ -1565,29 +1565,53 @@
   justify-content: space-between;
   gap: 15px;
   margin-top: 19px;
-  padding-top: 18px;
+  padding: 18px 20px;
   border-top: 1px solid #dfe7ef;
+  background: #ffffff;
+  border-radius: 0 0 12px 12px;
+}
+
+/* Back to Queue — solid blue, clearly visible */
+.consultation-actions .secondary-button {
+  min-height: 42px;
+  padding: 0 20px;
+  border: 2px solid #1976a9;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1976a9;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.consultation-actions .secondary-button:hover {
+  background: #e8f4fb;
+  border-color: #135d83;
+  color: #135d83;
 }
 
 .complete-consultation-button {
-  min-height: 40px;
+  min-height: 42px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 0 16px;
-  border: 1px solid #258c68;
+  padding: 0 22px;
+  border: 2px solid #1a7a52;
   border-radius: 8px;
-  background: #258c68;
+  background: #1a7a52;
   color: #ffffff;
   font-family: inherit;
-  font-size: 11px;
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 2px 8px rgba(26, 122, 82, 0.25);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .complete-consultation-button:hover {
-  background: #20795a;
+  background: #155f3f;
+  border-color: #155f3f;
+  box-shadow: 0 4px 14px rgba(26, 122, 82, 0.35);
 }
 
 .complete-consultation-button:focus-visible {
