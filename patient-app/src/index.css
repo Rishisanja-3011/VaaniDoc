@@ -1,0 +1,70 @@
+:root {
+  /* Brand */
+  --navy:        #0f2744;
+  --navy-light:  #1a3a5c;
+  --teal:        #0d9488;
+  --teal-dark:   #0f766e;
+  --teal-light:  #f0fdfa;
+  --teal-border: #99f6e4;
+
+  /* Page */
+  --page-bg:     #f0f4f8;
+  --card-bg:     #ffffff;
+  --border:      #e2e8f0;
+  --border-dark: #cbd5e1;
+
+  /* Text */
+  --text-h:      #0f172a;
+  --text:        #475569;
+  --text-muted:  #94a3b8;
+
+  /* Status */
+  --blue:        #2563eb;
+  --blue-light:  #eff6ff;
+  --blue-border: #bfdbfe;
+  --green:       #16a34a;
+  --green-light: #f0fdf4;
+  --green-border:#bbf7d0;
+  --amber:       #d97706;
+  --amber-light: #fffbeb;
+  --amber-border:#fde68a;
+  --red:         #dc2626;
+  --red-light:   #fef2f2;
+  --red-border:  #fecaca;
+
+  /* Shadows */
+  --shadow-sm:   0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md:   0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
+  --shadow-lg:   0 10px 24px rgba(0,0,0,0.10), 0 4px 8px rgba(0,0,0,0.04);
+
+  /* Radius */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+
+  /* Typography */
+  --sans: system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+
+  font: 16px/1.5 var(--sans);
+  color: var(--text);
+  background: var(--page-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; }
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Utility: visually hidden (accessibility) */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
