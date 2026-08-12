@@ -1,9 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from postgrest.exceptions import APIError
 
-from app.core.auth import get_current_user
-from app.core.supabase import supabase_admin
 from app.services.ai_service import (
     AIProcessingError,
     process_patient_text,
@@ -19,6 +17,10 @@ router = APIRouter(
     tags=["AI Processing"],
 )
 
+
+# ============================================================
+# REQUEST / RESPONSE MODELS
+# ============================================================
 
 class ProcessTextRequest(BaseModel):
     text: str = Field(min_length=1)
@@ -43,57 +45,30 @@ class ClinicalIntake(BaseModel):
     confidence: dict[str, float]
 
 
+# ============================================================
+# ERROR RECOVERY
+# ============================================================
+
 def restore_session_to_active(session_id: str) -> None:
     """
-    Best-effort recovery after AI/database processing fails.
+    Best-effort recovery if AI processing fails.
+
     Prevents a consultation from being permanently stuck
-    in 'processing'.
+    in the 'processing' state.
     """
     try:
-        update_session_status(session_id, "active")
+        update_session_status(
+            session_id,
+            "active",
+        )
     except Exception:
         # Preserve the original processing error.
         pass
 
 
-def get_doctor_id(user) -> str:
-    """
-    Resolve the authenticated Supabase user to the VaaniDoc
-    doctor profile.
-    """
-    response = (
-        supabase_admin
-        .table("doctors")
-        .select("id")
-        .eq("auth_user_id", user.id)
-        .limit(1)
-        .execute()
-    )
-
-    if not response.data:
-        raise HTTPException(
-            status_code=404,
-            detail="Doctor profile not found.",
-        )
-
-    return response.data[0]["id"]
-
-
-def require_session_owner(
-    session: dict,
-    user,
-) -> None:
-    """
-    Ensure the authenticated doctor owns the session.
-    """
-    doctor_id = get_doctor_id(user)
-
-    if session["doctor_id"] != doctor_id:
-        raise HTTPException(
-            status_code=403,
-            detail="You do not have access to this session.",
-        )
-
+# ============================================================
+# DIRECT TEXT PROCESSING
+# ============================================================
 
 @router.post(
     "/text",
@@ -102,6 +77,12 @@ def require_session_owner(
 async def process_text(
     request: ProcessTextRequest,
 ):
+    """
+    Direct AI processing endpoint.
+
+    Useful for development/testing.
+    """
+
     try:
         result = process_patient_text(
             text=request.text,
@@ -123,14 +104,32 @@ async def process_text(
         ) from exc
 
 
+# ============================================================
+# SESSION AI PROCESSING
+# ============================================================
+
 @router.post(
     "/session/{session_id}",
     response_model=ClinicalIntake,
 )
 async def process_session(
     session_id: str,
-    user=Depends(get_current_user),
 ):
+    """
+    Process the latest patient input belonging to a temporary
+    consultation session.
+
+    No doctor authentication is required here because the
+    temporary session_id identifies the consultation.
+
+    Doctor authorization is enforced separately on
+    doctor-facing session endpoints.
+    """
+
+    # --------------------------------------------------------
+    # 1. Find session
+    # --------------------------------------------------------
+
     session = get_session(session_id)
 
     if session is None:
@@ -139,10 +138,9 @@ async def process_session(
             detail="Session not found.",
         )
 
-    require_session_owner(
-        session,
-        user,
-    )
+    # --------------------------------------------------------
+    # 2. Reject closed sessions
+    # --------------------------------------------------------
 
     if session["status"] in {
         "completed",
@@ -153,13 +151,22 @@ async def process_session(
             detail="Session is no longer active.",
         )
 
+    # --------------------------------------------------------
+    # 3. Read latest temporary patient input
+    # --------------------------------------------------------
+
     try:
+        from app.core.supabase import supabase_admin
+
         input_response = (
             supabase_admin
             .table("temporary_inputs")
             .select("*")
             .eq("session_id", session_id)
-            .order("created_at", desc=True)
+            .order(
+                "created_at",
+                desc=True,
+            )
             .limit(1)
             .execute()
         )
@@ -178,6 +185,10 @@ async def process_session(
 
     patient_input = input_response.data[0]
 
+    # --------------------------------------------------------
+    # 4. Validate patient input
+    # --------------------------------------------------------
+
     text = patient_input.get("text_content")
     language = patient_input.get("language")
 
@@ -193,6 +204,10 @@ async def process_session(
             detail="Patient input language is missing.",
         )
 
+    # --------------------------------------------------------
+    # 5. AI processing
+    # --------------------------------------------------------
+
     try:
         update_session_status(
             session_id,
@@ -204,6 +219,10 @@ async def process_session(
             language=language,
         )
 
+        # ----------------------------------------------------
+        # 6. Save structured AI intake
+        # ----------------------------------------------------
+
         saved_intake = save_intake(
             session_id,
             result,
@@ -214,6 +233,10 @@ async def process_session(
                 "Failed to save AI intake."
             )
 
+        # ----------------------------------------------------
+        # 7. Mark session ready for doctor
+        # ----------------------------------------------------
+
         update_session_status(
             session_id,
             "ready",
@@ -221,32 +244,60 @@ async def process_session(
 
         return ClinicalIntake(**result)
 
+    # --------------------------------------------------------
+    # AI validation error
+    # --------------------------------------------------------
+
     except ValueError as exc:
-        restore_session_to_active(session_id)
+
+        restore_session_to_active(
+            session_id,
+        )
 
         raise HTTPException(
             status_code=400,
             detail=str(exc),
         ) from exc
 
+    # --------------------------------------------------------
+    # Gemini/API processing error
+    # --------------------------------------------------------
+
     except AIProcessingError as exc:
-        restore_session_to_active(session_id)
+
+        restore_session_to_active(
+            session_id,
+        )
 
         raise HTTPException(
             status_code=502,
             detail=str(exc),
         ) from exc
 
+    # --------------------------------------------------------
+    # Supabase/database error
+    # --------------------------------------------------------
+
     except APIError as exc:
-        restore_session_to_active(session_id)
+
+        restore_session_to_active(
+            session_id,
+        )
 
         raise HTTPException(
             status_code=503,
             detail="AI intake could not be saved to the database.",
         ) from exc
 
+    # --------------------------------------------------------
+    # Other processing error
+    # --------------------------------------------------------
+
     except RuntimeError as exc:
-        restore_session_to_active(session_id)
+
+        restore_session_to_active(
+            session_id,
+        )
 
         raise HTTPException(
             status_code=503,

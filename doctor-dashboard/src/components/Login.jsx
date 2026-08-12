@@ -7,6 +7,9 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 
+const API_URL =
+  import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+
 function Login({ onNavigate }) {
   const [formData, setFormData] = useState({
     email: '',
@@ -15,6 +18,7 @@ function Login({ onNavigate }) {
 
   const [errors, setErrors] = useState({})
   const [showPassword, setShowPassword] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   const handleChange = (event) => {
     const { name, value } = event.target
@@ -27,6 +31,7 @@ function Login({ onNavigate }) {
     setErrors((current) => ({
       ...current,
       [name]: '',
+      general: '',
     }))
   }
 
@@ -62,14 +67,72 @@ function Login({ onNavigate }) {
     return Object.keys(nextErrors).length === 0
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
 
     if (!validateForm()) {
       return
     }
 
-    onNavigate('dashboard')
+    setLoading(true)
+
+    try {
+      const response = await fetch(
+        `${API_URL}/auth/doctor/login`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: formData.email.trim(),
+            password: formData.password,
+          }),
+        },
+      )
+
+      let data = {}
+
+      try {
+        data = await response.json()
+      } catch {
+        // Ignore invalid JSON response.
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail || 'Unable to sign in.',
+        )
+      }
+
+      if (!data.access_token) {
+        throw new Error(
+          'Login succeeded but no access token was returned.',
+        )
+      }
+
+      localStorage.setItem(
+        'vaanidoc_access_token',
+        data.access_token,
+      )
+
+      if (data.refresh_token) {
+        localStorage.setItem(
+          'vaanidoc_refresh_token',
+          data.refresh_token,
+        )
+      }
+
+      onNavigate('dashboard')
+    } catch (error) {
+      setErrors({
+        general:
+          error.message ||
+          'Unable to sign in. Please try again.',
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -96,7 +159,15 @@ function Login({ onNavigate }) {
           </p>
         </div>
 
-        <form className="auth-form" onSubmit={handleSubmit} noValidate>
+        {errors.general && (
+          <p className="form-error">{errors.general}</p>
+        )}
+
+        <form
+          className="auth-form"
+          onSubmit={handleSubmit}
+          noValidate
+        >
           <label htmlFor="doctor-email">
             Email address
           </label>
@@ -109,10 +180,13 @@ function Login({ onNavigate }) {
             autoComplete="email"
             value={formData.email}
             onChange={handleChange}
+            disabled={loading}
           />
 
           {errors.email && (
-            <p className="form-error">{errors.email}</p>
+            <p className="form-error">
+              {errors.email}
+            </p>
           )}
 
           <label htmlFor="doctor-password">
@@ -125,18 +199,25 @@ function Login({ onNavigate }) {
             <input
               id="doctor-password"
               name="password"
-              type={showPassword ? 'text' : 'password'}
+              type={
+                showPassword
+                  ? 'text'
+                  : 'password'
+              }
               placeholder="Enter your password"
               autoComplete="current-password"
               value={formData.password}
               onChange={handleChange}
+              disabled={loading}
             />
 
             <button
               type="button"
               className="password-toggle"
               onClick={() =>
-                setShowPassword((current) => !current)
+                setShowPassword(
+                  (current) => !current,
+                )
               }
               aria-label={
                 showPassword
@@ -148,6 +229,7 @@ function Login({ onNavigate }) {
                   ? 'Hide password'
                   : 'Show password'
               }
+              disabled={loading}
             >
               {showPassword ? (
                 <EyeOff size={17} />
@@ -158,15 +240,18 @@ function Login({ onNavigate }) {
           </div>
 
           {errors.password && (
-            <p className="form-error">{errors.password}</p>
+            <p className="form-error">
+              {errors.password}
+            </p>
           )}
 
           <button
             type="submit"
             className="auth-primary-button"
+            disabled={loading}
           >
-            Sign in
-            <ArrowRight size={17} />
+            {loading ? 'Signing in...' : 'Sign in'}
+            {!loading && <ArrowRight size={17} />}
           </button>
         </form>
 
@@ -178,13 +263,14 @@ function Login({ onNavigate }) {
           type="button"
           className="auth-secondary-button"
           onClick={() => onNavigate('register')}
+          disabled={loading}
         >
           Create Doctor Account
         </button>
 
         <p className="auth-privacy">
-          Doctor authentication is secured through the VaaniDoc
-          authentication system.
+          Doctor authentication is secured through the
+          VaaniDoc authentication system.
         </p>
       </div>
     </div>

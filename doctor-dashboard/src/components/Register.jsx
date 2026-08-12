@@ -9,6 +9,9 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 
+const API_URL =
+  import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+
 function Register({ onNavigate }) {
   const [formData, setFormData] = useState({
     name: '',
@@ -19,6 +22,7 @@ function Register({ onNavigate }) {
 
   const [errors, setErrors] = useState({})
   const [showPassword, setShowPassword] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   const handleChange = (event) => {
     const { name, value } = event.target
@@ -31,6 +35,7 @@ function Register({ onNavigate }) {
     setErrors((current) => ({
       ...current,
       [name]: '',
+      submit: '',
     }))
   }
 
@@ -42,7 +47,6 @@ function Register({ onNavigate }) {
     const phone = formData.phone.trim()
     const password = formData.password
 
-    // Full name
     if (!name) {
       nextErrors.name = 'Full name is required.'
     } else if (name.length < 2) {
@@ -56,7 +60,6 @@ function Register({ onNavigate }) {
         'Full name can contain only letters, spaces, dots, apostrophes, and hyphens.'
     }
 
-    // Email
     if (!email) {
       nextErrors.email = 'Email address is required.'
     } else if (
@@ -68,7 +71,6 @@ function Register({ onNavigate }) {
         'Please enter a valid email address.'
     }
 
-    // Phone
     if (!phone) {
       nextErrors.phone = 'Phone number is required.'
     } else if (!/^\d{10}$/.test(phone)) {
@@ -76,7 +78,6 @@ function Register({ onNavigate }) {
         'Phone number must contain exactly 10 digits.'
     }
 
-    // Password
     if (!password) {
       nextErrors.password = 'Password is required.'
     } else if (password.length < 8) {
@@ -95,7 +96,9 @@ function Register({ onNavigate }) {
       nextErrors.password =
         'Password must contain at least one number.'
     } else if (
-      !/[!@#$%^&*(),.?":{}|<>_\-\\[\]'/`~+=;]/.test(password)
+      !/[!@#$%^&*(),.?":{}|<>_\-\\[\]'/`~+=;]/.test(
+        password,
+      )
     ) {
       nextErrors.password =
         'Password must contain at least one special character.'
@@ -106,14 +109,110 @@ function Register({ onNavigate }) {
     return Object.keys(nextErrors).length === 0
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
 
     if (!validateForm()) {
       return
     }
 
-    onNavigate('doctor-code')
+    setLoading(true)
+
+    try {
+      const response = await fetch(
+        `${API_URL}/auth/doctor/register`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: formData.name.trim(),
+            email: formData.email.trim(),
+            password: formData.password,
+          }),
+        },
+      )
+
+      let data = {}
+
+      try {
+        data = await response.json()
+      } catch {
+        data = {}
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+          'Doctor registration failed.',
+        )
+      }
+
+      if (data.access_token) {
+        localStorage.setItem(
+          'vaanidoc_access_token',
+          data.access_token,
+        )
+      }
+
+      if (data.doctor_id) {
+        localStorage.setItem(
+          'vaanidoc_doctor_id',
+          data.doctor_id,
+        )
+      }
+
+      if (data.doctor_code) {
+        localStorage.setItem(
+          'vaanidoc_doctor_code',
+          data.doctor_code,
+        )
+      }
+
+      if (data.qr_value) {
+        localStorage.setItem(
+          'vaanidoc_qr_value',
+          data.qr_value,
+        )
+      }
+
+      localStorage.setItem(
+        'vaanidoc_doctor_name',
+        formData.name.trim(),
+      )
+
+      /*
+       * Registration may not return a session when
+       * Supabase email confirmation is enabled.
+       *
+       * In that case the doctor must log in after
+       * confirming their email.
+       */
+      if (!data.access_token) {
+        setErrors({
+          submit:
+            'Account created successfully. Please log in with your new account.',
+        })
+
+        setLoading(false)
+
+        onNavigate('login')
+        return
+      }
+
+      setLoading(false)
+
+      onNavigate('doctor-code')
+    } catch (error) {
+      setLoading(false)
+
+      setErrors({
+        submit:
+          error.message ||
+          'Unable to create doctor account.',
+      })
+    }
   }
 
   return (
@@ -121,7 +220,10 @@ function Register({ onNavigate }) {
       <div className="auth-card register-card">
         <div className="auth-brand">
           <div className="auth-brand-icon">
-            <Stethoscope size={25} strokeWidth={2.2} />
+            <Stethoscope
+              size={25}
+              strokeWidth={2.2}
+            />
           </div>
 
           <div>
@@ -131,17 +233,29 @@ function Register({ onNavigate }) {
         </div>
 
         <div className="auth-heading">
-          <span className="eyebrow">DOCTOR REGISTRATION</span>
+          <span className="eyebrow">
+            DOCTOR REGISTRATION
+          </span>
 
           <h2>Create your account</h2>
 
           <p>
-            Register your doctor profile to start receiving patient
-            consultations.
+            Register your doctor profile to start
+            receiving patient consultations.
           </p>
         </div>
 
-        <form className="auth-form" onSubmit={handleSubmit} noValidate>
+        {errors.submit && (
+          <p className="form-error">
+            {errors.submit}
+          </p>
+        )}
+
+        <form
+          className="auth-form"
+          onSubmit={handleSubmit}
+          noValidate
+        >
           <label htmlFor="doctor-name">
             Full name
           </label>
@@ -161,7 +275,9 @@ function Register({ onNavigate }) {
           </div>
 
           {errors.name && (
-            <p className="form-error">{errors.name}</p>
+            <p className="form-error">
+              {errors.name}
+            </p>
           )}
 
           <label htmlFor="doctor-register-email">
@@ -183,7 +299,9 @@ function Register({ onNavigate }) {
           </div>
 
           {errors.email && (
-            <p className="form-error">{errors.email}</p>
+            <p className="form-error">
+              {errors.email}
+            </p>
           )}
 
           <label htmlFor="doctor-phone">
@@ -207,7 +325,9 @@ function Register({ onNavigate }) {
           </div>
 
           {errors.phone && (
-            <p className="form-error">{errors.phone}</p>
+            <p className="form-error">
+              {errors.phone}
+            </p>
           )}
 
           <label htmlFor="doctor-register-password">
@@ -220,7 +340,11 @@ function Register({ onNavigate }) {
             <input
               id="doctor-register-password"
               name="password"
-              type={showPassword ? 'text' : 'password'}
+              type={
+                showPassword
+                  ? 'text'
+                  : 'password'
+              }
               placeholder="Create a secure password"
               autoComplete="new-password"
               value={formData.password}
@@ -231,7 +355,9 @@ function Register({ onNavigate }) {
               type="button"
               className="password-toggle"
               onClick={() =>
-                setShowPassword((current) => !current)
+                setShowPassword(
+                  (current) => !current,
+                )
               }
               aria-label={
                 showPassword
@@ -253,15 +379,23 @@ function Register({ onNavigate }) {
           </div>
 
           {errors.password && (
-            <p className="form-error">{errors.password}</p>
+            <p className="form-error">
+              {errors.password}
+            </p>
           )}
 
           <button
             type="submit"
             className="auth-primary-button"
+            disabled={loading}
           >
-            Create Doctor Account
-            <ArrowRight size={17} />
+            {loading
+              ? 'Creating account...'
+              : 'Create Doctor Account'}
+
+            {!loading && (
+              <ArrowRight size={17} />
+            )}
           </button>
         </form>
 
@@ -273,17 +407,18 @@ function Register({ onNavigate }) {
           type="button"
           className="auth-secondary-button"
           onClick={() => onNavigate('login')}
+          disabled={loading}
         >
           Back to Login
         </button>
 
         <p className="auth-privacy">
-          Your doctor account is managed through the secure VaaniDoc
-          authentication system.
+          Your doctor account is managed through
+          the secure VaaniDoc authentication system.
         </p>
       </div>
     </div>
   )
 }
 
-export default Register 
+export default Register

@@ -7,7 +7,10 @@ from app.core.supabase import supabase_admin
 from app.services.session_service import (
     create_session,
     delete_session,
+    get_doctor_sessions,
     get_session,
+    get_session_input,
+    get_session_intake,
     save_patient_input,
     update_session_status,
 )
@@ -18,23 +21,52 @@ router = APIRouter(
 )
 
 
-class PatientInputRequest(BaseModel):
-    text: str = Field(min_length=1)
-    language: str = Field(min_length=2, max_length=10)
+# ============================================================
+# REQUEST MODELS
+# ============================================================
 
+class JoinSessionRequest(BaseModel):
+    doctor_code: str = Field(
+        min_length=1,
+        max_length=20,
+    )
+
+
+class PatientInputRequest(BaseModel):
+    text: str = Field(
+        min_length=1,
+    )
+    language: str = Field(
+        min_length=2,
+        max_length=10,
+    )
+
+
+# ============================================================
+# DOCTOR HELPERS
+# ============================================================
 
 def get_doctor_id(user) -> str:
     """
-    Resolve the authenticated Supabase user to the VaaniDoc doctor profile.
+    Resolve authenticated Supabase user to the VaaniDoc
+    doctor profile.
     """
-    response = (
-        supabase_admin
-        .table("doctors")
-        .select("id")
-        .eq("auth_user_id", user.id)
-        .limit(1)
-        .execute()
-    )
+
+    try:
+        response = (
+            supabase_admin
+            .table("doctors")
+            .select("id")
+            .eq("auth_user_id", user.id)
+            .limit(1)
+            .execute()
+        )
+
+    except APIError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to access doctor profile.",
+        ) from exc
 
     if not response.data:
         raise HTTPException(
@@ -50,8 +82,10 @@ def require_session_owner(
     user,
 ) -> dict:
     """
-    Return the session only if it belongs to the authenticated doctor.
+    Return a session only if it belongs to the
+    authenticated doctor.
     """
+
     session = get_session(session_id)
 
     if session is None:
@@ -71,17 +105,54 @@ def require_session_owner(
     return session
 
 
+# ============================================================
+# PATIENT FLOW
+# ============================================================
+
 @router.post(
-    "",
+    "/join",
     status_code=status.HTTP_201_CREATED,
 )
-async def create_consultation_session(
-    user=Depends(get_current_user),
+async def join_consultation_session(
+    request: JoinSessionRequest,
 ):
-    doctor_id = get_doctor_id(user)
+    """
+    Patient joins a doctor's consultation using the
+    doctor's unique QR/code.
+
+    No doctor authentication is required.
+    """
+
+    doctor_code = request.doctor_code.strip().upper()
 
     try:
-        return create_session(doctor_id)
+        doctor_response = (
+            supabase_admin
+            .table("doctors")
+            .select("id, name, doctor_code")
+            .eq("doctor_code", doctor_code)
+            .limit(1)
+            .execute()
+        )
+
+    except APIError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to find doctor.",
+        ) from exc
+
+    if not doctor_response.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Doctor not found.",
+        )
+
+    doctor = doctor_response.data[0]
+
+    try:
+        session = create_session(
+            doctor["id"],
+        )
 
     except APIError as exc:
         raise HTTPException(
@@ -89,44 +160,34 @@ async def create_consultation_session(
             detail="Unable to create consultation session.",
         ) from exc
 
-
-@router.get("/{session_id}")
-async def get_consultation_session(
-    session_id: str,
-    user=Depends(get_current_user),
-):
-    return require_session_owner(
-        session_id,
-        user,
-    )
-
-
-@router.get("/{session_id}/status")
-async def get_session_status(
-    session_id: str,
-    user=Depends(get_current_user),
-):
-    session = require_session_owner(
-        session_id,
-        user,
-    )
-
     return {
-        "session_id": session_id,
+        "session_id": session["session_id"],
+        "doctor_id": doctor["id"],
+        "doctor_name": doctor["name"],
+        "doctor_code": doctor["doctor_code"],
         "status": session["status"],
+        "created_at": session["created_at"],
     }
 
 
-@router.post("/{session_id}/input")
+@router.post(
+    "/{session_id}/input",
+)
 async def submit_patient_input(
     session_id: str,
     request: PatientInputRequest,
-    user=Depends(get_current_user),
 ):
-    session = require_session_owner(
-        session_id,
-        user,
-    )
+    """
+    Patient submits temporary symptom information.
+    """
+
+    session = get_session(session_id)
+
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found.",
+        )
 
     if session["status"] in {
         "completed",
@@ -170,11 +231,232 @@ async def submit_patient_input(
     }
 
 
-@router.post("/{session_id}/start")
+# ============================================================
+# DOCTOR SESSION CREATION
+# ============================================================
+
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_consultation_session(
+    user=Depends(get_current_user),
+):
+    """
+    Doctor can manually create a consultation session.
+    """
+
+    doctor_id = get_doctor_id(user)
+
+    try:
+        return create_session(
+            doctor_id,
+        )
+
+    except APIError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to create consultation session.",
+        ) from exc
+
+
+# ============================================================
+# DOCTOR QUEUE
+# IMPORTANT: THESE MUST COME BEFORE /{session_id}
+# ============================================================
+
+@router.get(
+    "/queue",
+)
+async def get_session_queue(
+    user=Depends(get_current_user),
+):
+    """
+    Return active consultation sessions belonging
+    to the authenticated doctor.
+    """
+
+    doctor_id = get_doctor_id(user)
+
+    try:
+        sessions = get_doctor_sessions(
+            doctor_id,
+        )
+
+    except APIError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to load patient queue.",
+        ) from exc
+
+    patients = []
+
+    for session in sessions:
+
+        try:
+            patient_input = get_session_input(
+                session["session_id"],
+            )
+
+            intake = get_session_intake(
+                session["session_id"],
+            )
+
+        except APIError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Unable to load patient information.",
+            ) from exc
+
+        patients.append(
+            {
+                "session_id": session["session_id"],
+                "status": session["status"],
+                "created_at": session["created_at"],
+                "language": (
+                    patient_input.get("language")
+                    if patient_input
+                    else None
+                ),
+                "complaint": (
+                    intake.get("chief_complaint")
+                    if intake
+                    else None
+                ),
+                "urgency": (
+                    intake.get("urgency")
+                    if intake
+                    else None
+                ),
+            }
+        )
+
+    return {
+        "doctor_id": doctor_id,
+        "patients": patients,
+        "count": len(patients),
+    }
+
+
+@router.get(
+    "/queue/{session_id}",
+)
+async def get_queue_patient(
+    session_id: str,
+    user=Depends(get_current_user),
+):
+    """
+    Return complete temporary consultation information
+    for the authenticated doctor.
+    """
+
+    session = require_session_owner(
+        session_id,
+        user,
+    )
+
+    try:
+        patient_input = get_session_input(
+            session_id,
+        )
+
+        intake = get_session_intake(
+            session_id,
+        )
+
+    except APIError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to load patient information.",
+        ) from exc
+
+    return {
+        "session": session,
+        "input": patient_input,
+        "intake": intake,
+    }
+
+
+# ============================================================
+# DOCTOR-ONLY SESSION ACCESS
+# ============================================================
+
+@router.get(
+    "/{session_id}",
+)
+async def get_consultation_session(
+    session_id: str,
+    user=Depends(get_current_user),
+):
+    """
+    Doctor can view their own consultation session
+    together with temporary patient input and AI intake.
+    """
+
+    session = require_session_owner(
+        session_id,
+        user,
+    )
+
+    try:
+        patient_input = get_session_input(
+            session_id,
+        )
+
+        intake = get_session_intake(
+            session_id,
+        )
+
+    except APIError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to load patient information.",
+        ) from exc
+
+    return {
+        "session": session,
+        "input": patient_input,
+        "intake": intake,
+    }
+
+
+@router.get(
+    "/{session_id}/status",
+)
+async def get_session_status(
+    session_id: str,
+    user=Depends(get_current_user),
+):
+    """
+    Doctor-only session status endpoint.
+    """
+
+    session = require_session_owner(
+        session_id,
+        user,
+    )
+
+    return {
+        "session_id": session_id,
+        "status": session["status"],
+    }
+
+
+# ============================================================
+# DOCTOR START SESSION
+# ============================================================
+
+@router.post(
+    "/{session_id}/start",
+)
 async def start_session(
     session_id: str,
     user=Depends(get_current_user),
 ):
+    """
+    Doctor starts the consultation.
+    """
+
     session = require_session_owner(
         session_id,
         user,
@@ -213,11 +495,21 @@ async def start_session(
     }
 
 
-@router.post("/{session_id}/complete")
+# ============================================================
+# DOCTOR COMPLETE SESSION
+# ============================================================
+
+@router.post(
+    "/{session_id}/complete",
+)
 async def complete_session(
     session_id: str,
     user=Depends(get_current_user),
 ):
+    """
+    Complete consultation and delete temporary data.
+    """
+
     session = require_session_owner(
         session_id,
         user,
@@ -233,10 +525,15 @@ async def complete_session(
         )
 
     try:
-        update_session_status(
+        updated_session = update_session_status(
             session_id,
             "completed",
         )
+
+        if updated_session is None:
+            raise RuntimeError(
+                "Unable to complete consultation session."
+            )
 
         deleted = delete_session(
             session_id,
@@ -246,6 +543,12 @@ async def complete_session(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to complete consultation session.",
+        ) from exc
+
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
         ) from exc
 
     if not deleted:
@@ -261,11 +564,21 @@ async def complete_session(
     }
 
 
-@router.post("/{session_id}/cancel")
+# ============================================================
+# DOCTOR CANCEL SESSION
+# ============================================================
+
+@router.post(
+    "/{session_id}/cancel",
+)
 async def cancel_session(
     session_id: str,
     user=Depends(get_current_user),
 ):
+    """
+    Cancel consultation and delete temporary data.
+    """
+
     session = require_session_owner(
         session_id,
         user,
@@ -281,10 +594,15 @@ async def cancel_session(
         )
 
     try:
-        update_session_status(
+        updated_session = update_session_status(
             session_id,
             "cancelled",
         )
+
+        if updated_session is None:
+            raise RuntimeError(
+                "Unable to cancel consultation session."
+            )
 
         deleted = delete_session(
             session_id,
@@ -294,6 +612,12 @@ async def cancel_session(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to cancel consultation session.",
+        ) from exc
+
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
         ) from exc
 
     if not deleted:

@@ -11,8 +11,22 @@ import './App.css'
 
 function App() {
   const [activePage, setActivePage] = useState('login')
+  const [selectedSessionId, setSelectedSessionId] = useState(null)
 
-  const handleNavigate = (page) => {
+  const handleNavigate = (page, params = {}) => {
+    // Store the selected patient session
+    if (params.sessionId) {
+      setSelectedSessionId(params.sessionId)
+    }
+
+    // Clear selected patient when leaving consultation flow
+    if (
+      page === 'queue' ||
+      page === 'dashboard'
+    ) {
+      setSelectedSessionId(null)
+    }
+
     setActivePage(page)
   }
 
@@ -21,19 +35,26 @@ function App() {
       title: 'Dashboard',
       subtitle: "Overview of today's consultations",
     },
+
     queue: {
       title: 'Patient Queue',
       subtitle: 'Manage patients waiting for consultation',
     },
+
     'current-patient': {
       title: 'Current Patient',
       subtitle: 'Review the active consultation',
     },
+
     settings: {
       title: 'Settings',
       subtitle: 'Manage your doctor dashboard preferences',
     },
   }
+
+  // -----------------------------
+  // AUTHENTICATION PAGES
+  // -----------------------------
 
   if (activePage === 'login') {
     return <Login onNavigate={handleNavigate} />
@@ -46,6 +67,10 @@ function App() {
   if (activePage === 'doctor-code') {
     return <DoctorCode onNavigate={handleNavigate} />
   }
+
+  // -----------------------------
+  // MAIN DASHBOARD
+  // -----------------------------
 
   const currentPage =
     pageConfig[activePage] || pageConfig.dashboard
@@ -60,19 +85,32 @@ function App() {
           activePage={activePage}
         />
 
+        {/* Dashboard */}
         {activePage === 'dashboard' && (
-          <Dashboard onNavigate={handleNavigate} />
+          <Dashboard
+            onNavigate={handleNavigate}
+          />
         )}
 
+        {/* Patient Queue */}
         {activePage === 'queue' && (
-          <PatientQueue onNavigate={handleNavigate} />
+          <PatientQueue
+            onNavigate={handleNavigate}
+          />
         )}
 
+        {/* Current Patient */}
         {activePage === 'current-patient' && (
-          <CurrentPatient onNavigate={handleNavigate} />
+          <CurrentPatient
+            onNavigate={handleNavigate}
+            sessionId={selectedSessionId}
+          />
         )}
 
-        {activePage === 'settings' && <Settings />}
+        {/* Settings */}
+        {activePage === 'settings' && (
+          <Settings />
+        )}
       </main>
     </div>
   )

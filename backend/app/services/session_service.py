@@ -20,6 +20,10 @@ def _first_row(response):
     return response.data[0]
 
 
+# ============================================================
+# CREATE SESSION
+# ============================================================
+
 def create_session(doctor_id: str) -> dict:
     response = (
         supabase_admin
@@ -36,7 +40,9 @@ def create_session(doctor_id: str) -> dict:
     session = _first_row(response)
 
     if session is None:
-        raise RuntimeError("Failed to create consultation session.")
+        raise RuntimeError(
+            "Failed to create consultation session."
+        )
 
     return {
         "session_id": session["id"],
@@ -47,6 +53,10 @@ def create_session(doctor_id: str) -> dict:
         "created_at": session["created_at"],
     }
 
+
+# ============================================================
+# GET SESSION
+# ============================================================
 
 def get_session(session_id: str) -> dict | None:
     response = (
@@ -74,13 +84,128 @@ def get_session(session_id: str) -> dict | None:
     }
 
 
+# ============================================================
+# GET DOCTOR QUEUE
+# ============================================================
+
+def get_doctor_sessions(
+    doctor_id: str,
+) -> list[dict]:
+    """
+    Return all active consultation sessions
+    belonging to a doctor.
+
+    Completed and cancelled sessions are excluded.
+    """
+
+    response = (
+        supabase_admin
+        .table("active_sessions")
+        .select("*")
+        .eq("doctor_id", doctor_id)
+        .in_(
+            "status",
+            [
+                "waiting",
+                "processing",
+                "ready",
+                "active",
+            ],
+        )
+        .order(
+            "created_at",
+            desc=False,
+        )
+        .execute()
+    )
+
+    sessions = []
+
+    for session in response.data or []:
+        sessions.append(
+            {
+                "session_id": session["id"],
+                "doctor_id": session["doctor_id"],
+                "status": session["status"],
+                "created_at": session["created_at"],
+                "started_at": session.get(
+                    "started_at"
+                ),
+                "completed_at": session.get(
+                    "completed_at"
+                ),
+                "expires_at": session.get(
+                    "expires_at"
+                ),
+            }
+        )
+
+    return sessions
+
+
+# ============================================================
+# GET LATEST PATIENT INPUT
+# ============================================================
+
+def get_session_input(
+    session_id: str,
+) -> dict | None:
+    """
+    Return the latest temporary patient input.
+    """
+
+    response = (
+        supabase_admin
+        .table("temporary_inputs")
+        .select("*")
+        .eq("session_id", session_id)
+        .order(
+            "created_at",
+            desc=True,
+        )
+        .limit(1)
+        .execute()
+    )
+
+    return _first_row(response)
+
+
+# ============================================================
+# GET AI INTAKE
+# ============================================================
+
+def get_session_intake(
+    session_id: str,
+) -> dict | None:
+    """
+    Return the temporary AI-generated intake.
+    """
+
+    response = (
+        supabase_admin
+        .table("temporary_intakes")
+        .select("*")
+        .eq("session_id", session_id)
+        .limit(1)
+        .execute()
+    )
+
+    return _first_row(response)
+
+
+# ============================================================
+# UPDATE SESSION STATUS
+# ============================================================
+
 def update_session_status(
     session_id: str,
     status: str,
 ) -> dict | None:
 
     if status not in VALID_STATUSES:
-        raise ValueError(f"Invalid session status: {status}")
+        raise ValueError(
+            f"Invalid session status: {status}"
+        )
 
     update_data = {
         "status": status,
@@ -88,12 +213,19 @@ def update_session_status(
 
     if status == "active":
         update_data["started_at"] = (
-            datetime.now(timezone.utc).isoformat()
+            datetime.now(
+                timezone.utc
+            ).isoformat()
         )
 
-    if status in {"completed", "cancelled"}:
+    if status in {
+        "completed",
+        "cancelled",
+    }:
         update_data["completed_at"] = (
-            datetime.now(timezone.utc).isoformat()
+            datetime.now(
+                timezone.utc
+            ).isoformat()
         )
 
     response = (
@@ -114,11 +246,21 @@ def update_session_status(
         "doctor_id": session["doctor_id"],
         "status": session["status"],
         "created_at": session["created_at"],
-        "started_at": session.get("started_at"),
-        "completed_at": session.get("completed_at"),
-        "expires_at": session.get("expires_at"),
+        "started_at": session.get(
+            "started_at"
+        ),
+        "completed_at": session.get(
+            "completed_at"
+        ),
+        "expires_at": session.get(
+            "expires_at"
+        ),
     }
 
+
+# ============================================================
+# SAVE PATIENT INPUT
+# ============================================================
 
 def save_patient_input(
     session_id: str,
@@ -136,9 +278,16 @@ def save_patient_input(
         .insert(
             {
                 "session_id": session_id,
-                "input_type": input_data.get("type", "text"),
-                "language": input_data.get("language"),
-                "text_content": input_data.get("text"),
+                "input_type": input_data.get(
+                    "type",
+                    "text",
+                ),
+                "language": input_data.get(
+                    "language"
+                ),
+                "text_content": input_data.get(
+                    "text"
+                ),
                 "audio_reference": input_data.get(
                     "audio_reference"
                 ),
@@ -155,6 +304,10 @@ def save_patient_input(
     return row
 
 
+# ============================================================
+# SAVE AI INTAKE
+# ============================================================
+
 def save_intake(
     session_id: str,
     intake: dict,
@@ -169,18 +322,38 @@ def save_intake(
 
     payload = {
         "session_id": session_id,
-        "chief_complaint": english["chief_complaint"],
-        "symptoms": english["symptoms"],
-        "negative_symptoms": english["negative_symptoms"],
-        "duration": english["duration"],
-        "relevant_history": english["relevant_history"],
-        "medications": english["medications"],
-        "allergies": english["allergies"],
+        "chief_complaint": english[
+            "chief_complaint"
+        ],
+        "symptoms": english[
+            "symptoms"
+        ],
+        "negative_symptoms": english[
+            "negative_symptoms"
+        ],
+        "duration": english[
+            "duration"
+        ],
+        "relevant_history": english[
+            "relevant_history"
+        ],
+        "medications": english[
+            "medications"
+        ],
+        "allergies": english[
+            "allergies"
+        ],
         "possible_symptom_categories": (
-            intake["possible_symptom_categories"]
+            intake[
+                "possible_symptom_categories"
+            ]
         ),
-        "urgency": intake["urgency"],
-        "confidence": intake["confidence"],
+        "urgency": intake[
+            "urgency"
+        ],
+        "confidence": intake[
+            "confidence"
+        ],
     }
 
     response = (
@@ -196,7 +369,14 @@ def save_intake(
     return _first_row(response)
 
 
-def delete_session(session_id: str) -> bool:
+# ============================================================
+# DELETE SESSION
+# ============================================================
+
+def delete_session(
+    session_id: str,
+) -> bool:
+
     response = (
         supabase_admin
         .table("active_sessions")
