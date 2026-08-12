@@ -2444,3 +2444,178 @@ html.vaanidoc-dark .ai-intake-icon {
 .password-field input {
   padding-right: 44px;
 }
+
+/* =========================================================
+   DOCTOR PROFILE PANEL
+   ========================================================= */
+
+.doctor-profile-wrapper {
+  position: relative;
+}
+
+.doctor-profile-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 290px;
+  padding: 16px;
+  border: 1px solid #dfe7ec;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(35, 55, 75, 0.12);
+  z-index: 100;
+}
+
+.profile-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e8eef2;
+}
+
+.profile-panel-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #3f6075;
+}
+
+.profile-panel-header > div:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+}
+
+.profile-panel-header strong {
+  display: block;
+  color: #26374b;
+  font-size: 13px;
+}
+
+.profile-panel-header span {
+  display: block;
+  margin-top: 2px;
+  color: #8290a0;
+  font-size: 10px;
+}
+
+.profile-close-button {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #8290a0;
+  cursor: pointer;
+}
+
+.profile-close-button:hover {
+  background: #f1f5f8;
+  color: #3f6075;
+}
+
+.profile-details {
+  padding: 13px 0;
+}
+
+.profile-detail {
+  padding: 7px 0;
+}
+
+.profile-detail span {
+  display: block;
+  margin-bottom: 3px;
+  color: #8290a0;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.profile-detail strong {
+  display: block;
+  color: #26374b;
+  font-size: 11px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.profile-logout-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 12px;
+  border: 1px solid #ead7da;
+  border-radius: 7px;
+  background: #fff8f8;
+  color: #b94c58;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.profile-logout-button:hover {
+  background: #fff0f1;
+}
+
+.profile-code-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.profile-copy-button {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid #dfe7ec;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #3f6075;
+  cursor: pointer;
+}
+
+.profile-copy-button:hover {
+  background: #f1f5f8;
+}
+
+.copy-success {
+  display: block;
+  margin-top: 4px;
+  color: #27805f;
+  font-size: 9px;
+}
+
+.back-dashboard-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #5f7485;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.back-dashboard-button:hover {
+  color: #2f596f;
+}
+
+.back-dashboard-button:focus-visible {
+  outline: 2px solid #18a6a6;
+  outline-offset: 3px;
+  border-radius: 4px;
+}

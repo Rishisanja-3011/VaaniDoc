@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
+
 load_dotenv()
 
 
@@ -15,6 +16,7 @@ APP_BASE_URL = os.getenv(
     "http://localhost:3000",
 ).rstrip("/")
 
+
 if not SUPABASE_URL:
     raise RuntimeError("SUPABASE_URL is not configured")
 
@@ -25,14 +27,18 @@ if not SUPABASE_SECRET_KEY:
     raise RuntimeError("SUPABASE_SECRET_KEY is not configured")
 
 
+# Normal client.
 supabase: Client = create_client(
     SUPABASE_URL,
     SUPABASE_PUBLISHABLE_KEY,
 )
 
 
+# Server-side privileged client.
+#
+# IMPORTANT:
+# SUPABASE_SECRET_KEY must NEVER be exposed to the frontend.
 supabase_admin: Client = create_client(
     SUPABASE_URL,
     SUPABASE_SECRET_KEY,
 )
-

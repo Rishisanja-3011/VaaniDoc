@@ -56,20 +56,6 @@ function PatientQueue({ onNavigate }) {
         </button>
       </section>
 
-      <section className="queue-summary">
-        <div className="queue-summary-item">
-          <strong>{patients.length}</strong>
-          <span>Patients waiting</span>
-        </div>
-
-        <div className="queue-summary-divider" />
-
-        <div className="queue-summary-item">
-          <strong>1</strong>
-          <span>High urgency</span>
-        </div>
-      </section>
-
       <section className="queue-list-section">
         <div className="section-heading">
           <div>

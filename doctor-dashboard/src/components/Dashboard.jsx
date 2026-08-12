@@ -1,6 +1,4 @@
 import {
-  Users,
-  Activity,
   ArrowRight,
   UserRound,
 } from 'lucide-react'
@@ -25,30 +23,6 @@ function Dashboard({ onNavigate }) {
           View Patient Queue
           <ArrowRight size={17} />
         </button>
-      </section>
-
-      <section className="stats-grid" aria-label="Dashboard statistics">
-        <article className="stat-card">
-          <div className="stat-card-icon">
-            <Users size={21} />
-          </div>
-
-          <div>
-            <span>Patients Waiting</span>
-            <strong>3</strong>
-          </div>
-        </article>
-
-        <article className="stat-card">
-          <div className="stat-card-icon">
-            <Activity size={21} />
-          </div>
-
-          <div>
-            <span>Consultations Today</span>
-            <strong>8</strong>
-          </div>
-        </article>
       </section>
 
       <section className="dashboard-section">
@@ -90,20 +64,6 @@ function Dashboard({ onNavigate }) {
             Next Patient
             <ArrowRight size={16} />
           </button>
-        </div>
-      </section>
-
-      <section className="privacy-notice">
-        <div className="privacy-notice-icon">
-          <Activity size={19} />
-        </div>
-
-        <div>
-          <strong>Privacy-first consultation</strong>
-          <p>
-            Patient information is available only during the active
-            consultation session and is removed when the session ends.
-          </p>
         </div>
       </section>
     </div>
