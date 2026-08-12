@@ -1,6 +1,5 @@
 import {
   ArrowRight,
-  BriefcaseMedical,
   Eye,
   EyeOff,
   LockKeyhole,
@@ -13,16 +12,13 @@ import { useState } from 'react'
 function Register({ onNavigate }) {
   const [formData, setFormData] = useState({
     name: '',
-    specialization: '',
     email: '',
     phone: '',
     password: '',
-    confirmPassword: '',
   })
 
   const [errors, setErrors] = useState({})
   const [showPassword, setShowPassword] = useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   const handleChange = (event) => {
     const { name, value } = event.target
@@ -42,11 +38,9 @@ function Register({ onNavigate }) {
     const nextErrors = {}
 
     const name = formData.name.trim()
-    const specialization = formData.specialization.trim()
     const email = formData.email.trim()
     const phone = formData.phone.trim()
     const password = formData.password
-    const confirmPassword = formData.confirmPassword
 
     // Full name
     if (!name) {
@@ -60,25 +54,6 @@ function Register({ onNavigate }) {
     } else if (!/^[A-Za-zÀ-ÖØ-öø-ÿ.' -]+$/.test(name)) {
       nextErrors.name =
         'Full name can contain only letters, spaces, dots, apostrophes, and hyphens.'
-    }
-
-    // Specialization
-    if (!specialization) {
-      nextErrors.specialization =
-        'Specialization is required.'
-    } else if (specialization.length < 2) {
-      nextErrors.specialization =
-        'Specialization must contain at least 2 characters.'
-    } else if (specialization.length > 80) {
-      nextErrors.specialization =
-        'Specialization cannot exceed 80 characters.'
-    } else if (
-      !/^[A-Za-zÀ-ÖØ-öø-ÿ0-9&/.,()' -]+$/.test(
-        specialization,
-      )
-    ) {
-      nextErrors.specialization =
-        'Please enter a valid specialization.'
     }
 
     // Email
@@ -124,15 +99,6 @@ function Register({ onNavigate }) {
     ) {
       nextErrors.password =
         'Password must contain at least one special character.'
-    }
-
-    // Confirm password
-    if (!confirmPassword) {
-      nextErrors.confirmPassword =
-        'Please confirm your password.'
-    } else if (password !== confirmPassword) {
-      nextErrors.confirmPassword =
-        'Passwords do not match.'
     }
 
     setErrors(nextErrors)
@@ -196,30 +162,6 @@ function Register({ onNavigate }) {
 
           {errors.name && (
             <p className="form-error">{errors.name}</p>
-          )}
-
-          <label htmlFor="doctor-specialization">
-            Specialization
-          </label>
-
-          <div className="input-with-icon">
-            <BriefcaseMedical size={17} />
-
-            <input
-              id="doctor-specialization"
-              name="specialization"
-              type="text"
-              placeholder="General Physician"
-              autoComplete="organization-title"
-              value={formData.specialization}
-              onChange={handleChange}
-            />
-          </div>
-
-          {errors.specialization && (
-            <p className="form-error">
-              {errors.specialization}
-            </p>
           )}
 
           <label htmlFor="doctor-register-email">
@@ -314,56 +256,6 @@ function Register({ onNavigate }) {
             <p className="form-error">{errors.password}</p>
           )}
 
-          <label htmlFor="doctor-confirm-password">
-            Confirm password
-          </label>
-
-          <div className="password-field">
-            <LockKeyhole size={17} />
-
-            <input
-              id="doctor-confirm-password"
-              name="confirmPassword"
-              type={
-                showConfirmPassword ? 'text' : 'password'
-              }
-              placeholder="Re-enter your password"
-              autoComplete="new-password"
-              value={formData.confirmPassword}
-              onChange={handleChange}
-            />
-
-            <button
-              type="button"
-              className="password-toggle"
-              onClick={() =>
-                setShowConfirmPassword((current) => !current)
-              }
-              aria-label={
-                showConfirmPassword
-                  ? 'Hide confirm password'
-                  : 'Show confirm password'
-              }
-              title={
-                showConfirmPassword
-                  ? 'Hide confirm password'
-                  : 'Show confirm password'
-              }
-            >
-              {showConfirmPassword ? (
-                <EyeOff size={17} />
-              ) : (
-                <Eye size={17} />
-              )}
-            </button>
-          </div>
-
-          {errors.confirmPassword && (
-            <p className="form-error">
-              {errors.confirmPassword}
-            </p>
-          )}
-
           <button
             type="submit"
             className="auth-primary-button"
@@ -394,4 +286,4 @@ function Register({ onNavigate }) {
   )
 }
 
-export default Register
+export default Register 

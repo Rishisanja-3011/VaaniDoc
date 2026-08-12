@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import Sidebar from './components/Sidebar'
 import Header from './components/Header'
 import Dashboard from './components/Dashboard'
 import Login from './components/Login'
@@ -48,19 +47,17 @@ function App() {
     return <DoctorCode onNavigate={handleNavigate} />
   }
 
-  const currentPage = pageConfig[activePage] || pageConfig.dashboard
+  const currentPage =
+    pageConfig[activePage] || pageConfig.dashboard
 
   return (
     <div className="app-shell">
-      <Sidebar
-        activePage={activePage}
-        onNavigate={handleNavigate}
-      />
-
       <main className="main-content">
         <Header
           title={currentPage.title}
           subtitle={currentPage.subtitle}
+          onNavigate={handleNavigate}
+          activePage={activePage}
         />
 
         {activePage === 'dashboard' && (
