@@ -22,23 +22,34 @@ app = FastAPI(
 # CORS
 # ============================================================
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+import os
+
+cors_origins_env = os.getenv("CORS_ORIGINS", "")
+if cors_origins_env:
+    allowed_origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
+else:
+    allowed_origins = [
         # Patient app
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:5174",
         "http://127.0.0.1:5174",
-
         # Doctor dashboard
         "http://localhost:5175",
         "http://127.0.0.1:5175",
-    ],
+        # Hospital admin
+        "http://localhost:5176",
+        "http://127.0.0.1:5176",
+    ]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 # ============================================================
@@ -49,6 +60,20 @@ app.include_router(auth_router)
 app.include_router(doctors_router)
 app.include_router(sessions_router)
 app.include_router(processing_router)
+
+
+# ============================================================
+# STARTUP CLEANUP
+# ============================================================
+
+@app.on_event("startup")
+async def startup_event():
+    try:
+        from app.services.session_service import cleanup_expired_sessions
+        removed = cleanup_expired_sessions(max_age_hours=4)
+    except Exception:
+        # Database configuration must not prevent the health endpoint from starting.
+        pass
 
 
 # ============================================================

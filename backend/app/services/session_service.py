@@ -427,3 +427,24 @@ def delete_session(
     )
 
     return bool(response.data)
+
+
+def cleanup_expired_sessions(max_age_hours: int = 4) -> int:
+    """
+    Deletes active_sessions older than max_age_hours (default 4 hours).
+    Cascading foreign keys in Supabase automatically delete temporary_inputs and temporary_intakes.
+    """
+    try:
+        from datetime import datetime, timezone
+        cutoff = datetime.now(timezone.utc).isoformat()
+
+        response = (
+            supabase_admin
+            .table("active_sessions")
+            .delete()
+            .lt("expires_at", cutoff)
+            .execute()
+        )
+        return len(response.data) if response.data else 0
+    except Exception:
+        return 0

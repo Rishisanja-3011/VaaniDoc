@@ -198,15 +198,42 @@ async def process_session(
             detail="Session is no longer active.",
         )
 
-    # AI processing should begin from waiting.
-    if session["status"] != "waiting":
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Session is not ready for AI processing. "
-                f"Current status: {session['status']}"
-            ),
-        )
+    # A completed intake is safe to return for an idempotent retry.
+    if session["status"] in {"ready", "active", "processing"}:
+        try:
+            intake_res = (
+                supabase_admin
+                .table("temporary_intakes")
+                .select("*")
+                .eq("session_id", session_id)
+                .limit(1)
+                .execute()
+            )
+            if intake_res.data:
+                existing = intake_res.data[0]
+                return ClinicalIntake(
+                    language=session.get("language") or "en",
+                    english_intake=EnglishIntake(
+                        chief_complaint=existing.get("chief_complaint") or "",
+                        symptoms=existing.get("symptoms") or [],
+                        negative_symptoms=existing.get("negative_symptoms") or [],
+                        duration=existing.get("duration") or "",
+                        relevant_history=existing.get("relevant_history") or [],
+                        medications=existing.get("medications") or [],
+                        allergies=existing.get("allergies") or [],
+                    ),
+                    possible_symptom_categories=existing.get("possible_symptom_categories") or [],
+                    urgency=existing.get("urgency") or "moderate",
+                    confidence=existing.get("confidence") or {"symptoms": 1.0, "category": 0.9, "urgency": 0.8},
+                )
+        except Exception:
+            pass
+
+        if session["status"] == "processing":
+            raise HTTPException(
+                status_code=409,
+                detail="Clinical intake is already being prepared.",
+            )
 
     # --------------------------------------------------------
     # 3. GET LATEST PATIENT INPUT
@@ -293,33 +320,6 @@ async def process_session(
             status_code=400,
             detail="Patient input language is empty.",
         )
-
-    # --------------------------------------------------------
-    # DEBUG LOG
-    # --------------------------------------------------------
-
-    print(
-        "\n"
-        "============================================================\n"
-        "SESSION AI PROCESSING\n"
-        "============================================================"
-    )
-
-    print(
-        f"session_id : {session_id}"
-    )
-
-    print(
-        f"language   : {language}"
-    )
-
-    print(
-        f"text       : {text!r}"
-    )
-
-    print(
-        "============================================================\n"
-    )
 
     # --------------------------------------------------------
     # 5. MARK PROCESSING
@@ -449,10 +449,6 @@ async def process_session(
 
         restore_session_to_waiting(
             session_id
-        )
-
-        print(
-            f"Unexpected session processing error: {exc}"
         )
 
         raise HTTPException(

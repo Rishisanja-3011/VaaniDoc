@@ -4,6 +4,7 @@ import {
   Route,
   Navigate,
   useParams,
+  useLocation,
 } from 'react-router-dom'
 
 import JoinDoctor from './pages/JoinDoctor.jsx'
@@ -29,10 +30,13 @@ const QRScanner = lazy(
 
 function WaitingRoomRoute() {
   const { sessionId } = useParams()
+  const { state } = useLocation()
 
   return (
-    <WaitingRoom
+      <WaitingRoom
       sessionId={sessionId}
+      doctorName={state?.doctorName}
+      doctorCode={state?.doctorCode}
     />
   )
 }

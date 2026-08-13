@@ -3,12 +3,43 @@ import {
   Check,
   Copy,
   LogOut,
+  Mail,
   Moon,
   Sun,
-  UserCircle,
   X,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { apiFetch } from '../services/api'
+
+const initials = (name = '') =>
+  name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0])
+    .join('')
+    .toUpperCase() || 'DR'
+
+function copyText(value) {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(value)
+  }
+
+  const field = document.createElement('textarea')
+  field.value = value
+  field.style.position = 'fixed'
+  field.style.opacity = '0'
+
+  document.body.appendChild(field)
+  field.select()
+
+  const copied = document.execCommand('copy')
+  field.remove()
+
+  return copied
+    ? Promise.resolve()
+    : Promise.reject(new Error('Copy unavailable'))
+}
 
 function Header({
   title,
@@ -18,34 +49,29 @@ function Header({
 }) {
   const [darkMode, setDarkMode] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [doctor, setDoctor] = useState(null)
+  const [notice, setNotice] = useState('')
 
   const profileRef = useRef(null)
 
-  const doctorCode = 'VD-XXXX'
+  useEffect(() => {
+    let mounted = true
 
-  const handleThemeToggle = () => {
-    const nextTheme = !darkMode
+    apiFetch('/doctors/me')
+      .then((data) => {
+        if (mounted) {
+          setDoctor(data)
+        }
+      })
+      .catch(() => { })
 
-    setDarkMode(nextTheme)
-
-    document.documentElement.classList.toggle(
-      'vaanidoc-dark',
-      nextTheme,
-    )
-  }
-
-  const handleProfileToggle = () => {
-    setShowProfile((current) => !current)
-  }
-
-  const handleBackToDashboard = () => {
-    setShowProfile(false)
-    onNavigate('dashboard')
-  }
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   useEffect(() => {
-    const handleClickOutside = (event) => {
+    const close = (event) => {
       if (
         profileRef.current &&
         !profileRef.current.contains(event.target)
@@ -54,71 +80,119 @@ function Header({
       }
     }
 
-    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('mousedown', close)
 
     return () => {
-      document.removeEventListener(
-        'mousedown',
-        handleClickOutside,
-      )
+      document.removeEventListener('mousedown', close)
     }
   }, [])
 
-  const handleCopyCode = async () => {
+  const copyCode = async () => {
+    if (!doctor?.doctor_code) return
+
     try {
-      await navigator.clipboard.writeText(doctorCode)
-
-      setCopied(true)
-
-      setTimeout(() => {
-        setCopied(false)
-      }, 1800)
+      await copyText(doctor.doctor_code)
+      setNotice('Doctor code copied!')
     } catch {
-      setCopied(false)
+      setNotice(
+        'Unable to copy. Please select the code manually.'
+      )
     }
+
+    window.setTimeout(() => {
+      setNotice('')
+    }, 2200)
   }
 
-  const handleLogout = () => {
-    setShowProfile(false)
+  const logout = () => {
+    localStorage.removeItem('vaanidoc_access_token')
+    localStorage.removeItem('vaanidoc_refresh_token')
 
-    document.documentElement.classList.remove('vaanidoc-dark')
-    setDarkMode(false)
+    setShowProfile(false)
 
     onNavigate('login')
   }
 
+  const toggleTheme = () => {
+    const next = !darkMode
+
+    setDarkMode(next)
+
+    document.documentElement.classList.toggle(
+      'vaanidoc-dark',
+      next
+    )
+  }
+
   return (
     <header className="dashboard-header">
-      <div className="dashboard-header-title">
+
+      {/* =====================================================
+          VAANIDOC BRANDING
+          ===================================================== */}
+
+      <div className="dashboard-brand">
+
+        {/* VaaniDoc heartbeat symbol */}
+        <div className="dashboard-brand-icon">
+          <svg
+            viewBox="0 0 48 48"
+            aria-hidden="true"
+          >
+            <path
+              d="M5 25h9l4-12 7 24 5-16 3 4h10"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </div>
+
+        <div className="dashboard-brand-text">
+          <strong>VaaniDoc</strong>
+          <span>Multilingual AI Health Intake</span>
+        </div>
+
+      </div>
+
+      {/* =====================================================
+          BACK BUTTON
+          Only shown on non-dashboard pages
+          ===================================================== */}
+
+      <div className="dashboard-header-center">
+
         {activePage !== 'dashboard' && (
           <button
             type="button"
             className="back-dashboard-button"
-            onClick={handleBackToDashboard}
+            onClick={() => onNavigate('dashboard')}
             aria-label="Back to dashboard"
-            title="Back to Dashboard"
           >
             <ArrowLeft size={18} />
             <span>Dashboard</span>
           </button>
         )}
 
-        <h2>{title}</h2>
-
-        {subtitle && <p>{subtitle}</p>}
       </div>
 
+      {/* =====================================================
+          RIGHT SIDE
+          ===================================================== */}
+
       <div className="dashboard-header-actions">
+
         <button
           type="button"
           className="header-icon-button theme-toggle-button"
-          onClick={handleThemeToggle}
+          onClick={toggleTheme}
           aria-label={
             darkMode
               ? 'Switch to light theme'
               : 'Switch to dark theme'
           }
-          title={darkMode ? 'Light theme' : 'Dark theme'}
         >
           {darkMode ? (
             <Sun size={19} />
@@ -131,94 +205,144 @@ function Header({
           className="doctor-profile-wrapper"
           ref={profileRef}
         >
+
           <button
             type="button"
             className="doctor-profile-button"
-            onClick={handleProfileToggle}
-            aria-label="Doctor profile"
+            onClick={() =>
+              setShowProfile((value) => !value)
+            }
+            aria-label="Open doctor profile"
             aria-expanded={showProfile}
           >
-            <UserCircle size={30} />
+
+            <span className="header-doctor-avatar">
+              {initials(doctor?.name)}
+            </span>
 
             <div>
-              <strong>Dr. Doctor</strong>
-              <span>General Physician</span>
+              <strong>
+                {doctor?.name || 'Your profile'}
+              </strong>
+
+              <span>
+                VaaniDoc doctor
+              </span>
             </div>
+
           </button>
 
           {showProfile && (
-            <div className="doctor-profile-panel">
+            <section
+              className="doctor-profile-panel"
+              aria-label="Doctor profile"
+            >
+
               <div className="profile-panel-header">
-                <div className="profile-panel-avatar">
-                  <UserCircle size={36} />
-                </div>
+
+                <span className="profile-initials">
+                  {initials(doctor?.name)}
+                </span>
 
                 <div>
-                  <strong>Dr. Doctor</strong>
-                  <span>General Physician</span>
+                  <strong>
+                    {doctor?.name ||
+                      'Loading profile…'}
+                  </strong>
+
+                  <span>
+                    Authenticated VaaniDoc doctor
+                  </span>
                 </div>
 
                 <button
                   type="button"
                   className="profile-close-button"
-                  onClick={() => setShowProfile(false)}
+                  onClick={() =>
+                    setShowProfile(false)
+                  }
                   aria-label="Close doctor profile"
-                  title="Close"
                 >
                   <X size={17} />
                 </button>
+
               </div>
 
-              <div className="profile-details">
-                <div className="profile-detail">
-                  <span>Email</span>
-                  <strong>doctor@example.com</strong>
-                </div>
+              {doctor ? (
+                <div className="profile-details">
 
-                <div className="profile-detail">
-                  <span>Phone</span>
-                  <strong>9876543210</strong>
-                </div>
+                  <div className="profile-detail">
 
-                <div className="profile-detail">
-                  <span>Doctor Code</span>
+                    <span>
+                      <Mail size={14} />
+                      Email
+                    </span>
 
-                  <div className="profile-code-row">
-                    <strong>{doctorCode}</strong>
+                    <strong>
+                      {doctor.email}
+                    </strong>
 
-                    <button
-                      type="button"
-                      className="profile-copy-button"
-                      onClick={handleCopyCode}
-                      aria-label="Copy doctor code"
-                      title="Copy doctor code"
-                    >
-                      {copied ? (
-                        <Check size={15} />
-                      ) : (
-                        <Copy size={15} />
-                      )}
-                    </button>
                   </div>
 
-                  {copied && (
-                    <span className="copy-success">
-                      Copied
+                  <div className="profile-detail profile-code-detail">
+
+                    <span>
+                      Permanent doctor code
                     </span>
+
+                    <div className="profile-code-row">
+
+                      <strong>
+                        {doctor.doctor_code}
+                      </strong>
+
+                      <button
+                        type="button"
+                        className="profile-copy-button"
+                        onClick={copyCode}
+                        aria-label="Copy permanent doctor code"
+                      >
+                        {notice ===
+                          'Doctor code copied!' ? (
+                          <Check size={15} />
+                        ) : (
+                          <Copy size={15} />
+                        )}
+                      </button>
+
+                    </div>
+
+                  </div>
+
+                  {notice && (
+                    <div
+                      className="copy-success"
+                      role="status"
+                    >
+                      {notice}
+                    </div>
                   )}
+
                 </div>
-              </div>
+              ) : (
+                <p className="profile-loading">
+                  Profile details are temporarily
+                  unavailable.
+                </p>
+              )}
 
               <button
                 type="button"
                 className="profile-logout-button"
-                onClick={handleLogout}
+                onClick={logout}
               >
                 <LogOut size={17} />
                 Logout
               </button>
-            </div>
+
+            </section>
           )}
+
         </div>
       </div>
     </header>

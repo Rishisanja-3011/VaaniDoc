@@ -1,124 +1,65 @@
-import {
-  ChevronRight,
-  Copy,
-  ShieldCheck,
-  UserRound,
-} from 'lucide-react'
-import { useState } from 'react'
+import { Copy, QrCode, ShieldCheck, UserRound } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { apiFetch } from '../services/api'
+
+function copyText(value) {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(value)
+  const input = document.createElement('textarea')
+  input.value = value
+  input.setAttribute('readonly', '')
+  input.style.position = 'fixed'
+  input.style.opacity = '0'
+  document.body.appendChild(input)
+  input.select()
+  const copied = document.execCommand('copy')
+  input.remove()
+  return copied ? Promise.resolve() : Promise.reject(new Error('Copy unavailable'))
+}
 
 function Settings() {
-  const doctorCode = 'VAN-ABC123'
-  const [copied, setCopied] = useState(false)
+  const [doctor, setDoctor] = useState(null)
+  const [notice, setNotice] = useState('')
+  const [error, setError] = useState('')
 
-  const handleCopyCode = async () => {
+  const loadProfile = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(doctorCode)
-      setCopied(true)
-
-      setTimeout(() => {
-        setCopied(false)
-      }, 1500)
+      setError('')
+      setDoctor(await apiFetch('/doctors/me'))
     } catch {
-      setCopied(false)
+      setError('Unable to load your profile right now. Please try again.')
     }
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadProfile() }, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadProfile])
+
+  const copyCode = async () => {
+    if (!doctor?.doctor_code) return
+    try {
+      await copyText(doctor.doctor_code)
+      setNotice('Code copied')
+    } catch {
+      setNotice('Unable to copy the code. Please select it manually.')
+    }
+    window.setTimeout(() => setNotice(''), 2200)
   }
 
   return (
     <div className="page-content settings-page">
-      <section className="settings-header">
-        <span className="eyebrow">SETTINGS</span>
-
-        <h3>Doctor settings</h3>
-
-        <p>
-          Manage your doctor profile and view your consultation
-          information.
-        </p>
-      </section>
-
+      <section className="settings-header"><span className="eyebrow">PROFILE</span><h3>Your doctor profile</h3><p>Your permanent patient-join identity.</p></section>
+      {error && <div className="form-error" role="alert">{error} <button type="button" onClick={loadProfile}>Try again</button></div>}
       <section className="settings-grid">
         <article className="settings-card">
-          <div className="settings-card-heading">
-            <div className="settings-card-icon">
-              <UserRound size={19} />
-            </div>
-
-            <div>
-              <h4>Doctor Profile</h4>
-              <p>
-                Basic information about your VaaniDoc doctor account.
-              </p>
-            </div>
-          </div>
-
+          <div className="settings-card-heading"><div className="settings-card-icon"><UserRound size={19} /></div><div><h4>{doctor?.name || 'Loading profile…'}</h4><p>{doctor?.email || 'Authenticated VaaniDoc doctor'}</p></div></div>
           <div className="settings-list">
-            <button type="button" className="settings-row">
-              <div>
-                <strong>Doctor name</strong>
-                <span>Dr. Doctor</span>
-              </div>
-
-              <ChevronRight size={17} />
-            </button>
-
-            <button type="button" className="settings-row">
-              <div>
-                <strong>Specialization</strong>
-                <span>General Physician</span>
-              </div>
-
-              <ChevronRight size={17} />
-            </button>
-
-            <div className="settings-doctor-code">
-              <div>
-                <strong>Doctor code</strong>
-                <span>{doctorCode}</span>
-              </div>
-
-              <button
-                type="button"
-                className="settings-copy-button"
-                onClick={handleCopyCode}
-                aria-label="Copy doctor code"
-                title="Copy doctor code"
-              >
-                <Copy size={16} />
-              </button>
-            </div>
-
-            {copied && (
-              <div className="settings-copy-success">
-                Doctor code copied
-              </div>
-            )}
+            <div className="settings-row"><div><strong>Permanent VAN code</strong><span>{doctor?.doctor_code || '—'}</span></div><button type="button" className="settings-copy-button" onClick={copyCode} disabled={!doctor?.doctor_code} aria-label="Copy permanent VAN code" title="Copy permanent VAN code"><Copy size={16} /></button></div>
+            <div className="settings-row"><div><strong>Patient join link</strong><span>{doctor?.qr_value ? 'Available through your QR code' : 'Loading…'}</span></div><QrCode size={17} aria-hidden="true" /></div>
           </div>
+          {notice && <div className="settings-copy-success" role="status">{notice}</div>}
         </article>
-
-        <article className="settings-card privacy-settings-card">
-          <div className="settings-card-heading">
-            <div className="settings-card-icon">
-              <ShieldCheck size={19} />
-            </div>
-
-            <div>
-              <h4>Privacy</h4>
-              <p>
-                Information about consultation data handling.
-              </p>
-            </div>
-          </div>
-
-          <div className="privacy-settings-note">
-            <strong>Session-based patient information</strong>
-
-            <p>
-              Patient information displayed during consultations is
-              intended for the active session and is not intended for
-              permanent storage in the doctor dashboard.
-            </p>
-          </div>
-        </article>
+        <article className="settings-card privacy-settings-card"><div className="settings-card-heading"><div className="settings-card-icon"><ShieldCheck size={19} /></div><div><h4>Privacy by session</h4><p>Patient content is removed when a consultation ends.</p></div></div><div className="privacy-settings-note"><strong>AI-assisted intake only</strong><p>VaaniDoc structures patient-reported information. It does not diagnose or prescribe treatment.</p></div></article>
       </section>
     </div>
   )

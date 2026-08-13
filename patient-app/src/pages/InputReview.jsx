@@ -26,9 +26,8 @@ import {
 import PageShell from '../components/PageShell.jsx'
 
 import {
+  createSession,
   submitTextInput,
-  submitAudioInput,
-  processSession,
 } from '../services/sessionService.js'
 
 import {
@@ -138,7 +137,7 @@ export default function InputReview() {
       // 1. Send patient input
       // ------------------------------------------------------
 
-      if (item.type === 'text') {
+      if (item.text?.trim()) {
 
         await submitTextInput(
           item.sessionId,
@@ -147,22 +146,8 @@ export default function InputReview() {
         )
 
       } else {
-
-        await submitAudioInput(
-          item.sessionId,
-          item.audioBlob,
-          item.language,
-        )
+        throw new Error('No voice transcript was captured. Please record again or type your symptoms.')
       }
-
-
-      // ------------------------------------------------------
-      // 2. Run AI processing
-      // ------------------------------------------------------
-
-      await processSession(
-        item.sessionId,
-      )
     },
     [],
   )
@@ -353,15 +338,58 @@ export default function InputReview() {
   // RETRY
   // ----------------------------------------------------------
 
-  function handleRetry() {
+  async function handleRetry() {
 
     submittedRef.current = false
 
-    setSubmitState('idle')
+    const isInactive = errorMsg.includes('no longer active') || errorMsg.includes('expired')
 
     setErrorMsg('')
 
     clearQueue()
+
+    if (isInactive && doctorCode) {
+      setSubmitState('loading')
+
+      try {
+        const newSession = await createSession(doctorCode)
+        const newSessionId = newSession.session_id || newSession.id
+
+        const item = {
+          sessionId: newSessionId,
+          type,
+          language,
+          text: state.text,
+          audioBlob: state.audioBlob,
+        }
+
+        await doSubmit(item)
+
+        setSubmitState('sent')
+
+        setTimeout(() => {
+          navigate(
+            `/waiting/${newSessionId}`,
+            {
+              state: {
+                doctorCode,
+                doctorName,
+              },
+              replace: true,
+            },
+          )
+        }, 500)
+
+      } catch (retryErr) {
+        submittedRef.current = false
+        setErrorMsg(friendlyApiError(retryErr))
+        setSubmitState('failed')
+      }
+
+      return
+    }
+
+    setSubmitState('idle')
 
     handleSubmit()
   }
@@ -495,6 +523,10 @@ export default function InputReview() {
             </div>
 
           </div>
+        )}
+
+        {type === 'voice' && state.text && (
+          <p style={s.previewText}>{state.text}</p>
         )}
 
       </div>
@@ -673,7 +705,9 @@ export default function InputReview() {
 
             <RefreshCw size={15} />
 
-            Retry
+            {errorMsg.includes('no longer active') || errorMsg.includes('expired')
+              ? 'Start New Session & Submit'
+              : 'Retry'}
 
           </button>
 

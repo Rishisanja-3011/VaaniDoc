@@ -10,8 +10,8 @@ load_dotenv(BASE_DIR / ".env")
 
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
-SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY")
+SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 APP_BASE_URL = os.getenv(
     "APP_BASE_URL",
@@ -23,10 +23,10 @@ if not SUPABASE_URL:
     raise RuntimeError("SUPABASE_URL is not configured")
 
 if not SUPABASE_PUBLISHABLE_KEY:
-    raise RuntimeError("SUPABASE_PUBLISHABLE_KEY is not configured")
+    raise RuntimeError("SUPABASE_PUBLISHABLE_KEY (or SUPABASE_ANON_KEY) is not configured")
 
 if not SUPABASE_SECRET_KEY:
-    raise RuntimeError("SUPABASE_SECRET_KEY is not configured")
+    raise RuntimeError("SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) is not configured")
 
 
 # Normal client.

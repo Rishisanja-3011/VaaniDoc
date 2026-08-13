@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import asyncio
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, Field
 from postgrest.exceptions import APIError
 
@@ -14,6 +15,19 @@ from app.services.session_service import (
     save_patient_input,
     update_session_status,
 )
+
+
+def _auto_process_session(session_id: str):
+    """
+    Background task to execute session AI intake processing automatically upon receiving patient input.
+    """
+    try:
+        from app.api.processing import process_session
+        asyncio.run(process_session(session_id))
+    except Exception as exc:
+        err_msg = str(exc).encode('ascii', 'backslashreplace').decode('ascii')
+        print(f"[BACKGROUND AI ERROR] Session {session_id}: {err_msg}")
+
 
 router = APIRouter(
     prefix="/sessions",
@@ -35,6 +49,7 @@ class JoinSessionRequest(BaseModel):
 class PatientInputRequest(BaseModel):
     text: str = Field(
         min_length=1,
+        max_length=8000,
     )
     language: str = Field(
         min_length=2,
@@ -186,6 +201,7 @@ async def join_consultation_session(
 async def submit_patient_input(
     session_id: str,
     request: PatientInputRequest,
+    background_tasks: BackgroundTasks,
 ):
     """
     Patient submits temporary symptom information.
@@ -203,13 +219,10 @@ async def submit_patient_input(
             detail="Session not found.",
         )
 
-    if session["status"] in {
-        "completed",
-        "cancelled",
-    }:
+    if session["status"] != "waiting":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Session is no longer active.",
+            detail="Symptoms have already been submitted for this session.",
         )
 
     try:
@@ -239,10 +252,14 @@ async def submit_patient_input(
             detail=str(exc),
         ) from exc
 
+    # Automatically start AI processing in the background
+    background_tasks.add_task(_auto_process_session, session_id)
+
     return {
         "session_id": session_id,
         "status": "received",
     }
+
 
 
 # ============================================================

@@ -4,7 +4,7 @@ import {
   Languages,
   UserRound,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import {
   getSessionQueue,
@@ -21,7 +21,7 @@ function PatientQueue({ onNavigate }) {
   // LOAD DOCTOR QUEUE
   // ============================================================
 
-  const loadQueue = async () => {
+  const loadQueue = useCallback(async () => {
     try {
       setLoading(true)
       setError('')
@@ -59,7 +59,7 @@ function PatientQueue({ onNavigate }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
 
   // ============================================================
@@ -67,8 +67,11 @@ function PatientQueue({ onNavigate }) {
   // ============================================================
 
   useEffect(() => {
-    loadQueue()
-  }, [])
+    const timer = window.setTimeout(() => {
+      void loadQueue()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadQueue])
 
 
   // ============================================================

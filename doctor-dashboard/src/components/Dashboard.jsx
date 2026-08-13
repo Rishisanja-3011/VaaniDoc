@@ -3,12 +3,13 @@ import {
   UserRound,
 } from 'lucide-react'
 import {
+  useCallback,
   useEffect,
   useState,
 } from 'react'
 
 const API_BASE_URL =
-  'http://127.0.0.1:8000'
+  import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
 
 function Dashboard({ onNavigate }) {
   const [patients, setPatients] =
@@ -20,7 +21,7 @@ function Dashboard({ onNavigate }) {
   const [error, setError] =
     useState('')
 
-  const loadQueue = async () => {
+  const loadQueue = useCallback(async () => {
     try {
       setLoading(true)
       setError('')
@@ -90,11 +91,14 @@ function Dashboard({ onNavigate }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
-    loadQueue()
-  }, [])
+    const timer = window.setTimeout(() => {
+      void loadQueue()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadQueue])
 
   const formatLanguage = (
     language,

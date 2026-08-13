@@ -1,6 +1,5 @@
 import sys
 from pathlib import Path
-
 import pytest
 
 BACKEND_DIR = Path(__file__).resolve().parents[1] / "backend"
@@ -8,9 +7,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1] / "backend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-
-from app.services.ai_service import process_patient_text
-
+from app.services import ai_service
 
 TEST_CASES = [
     {
@@ -164,6 +161,309 @@ TEST_CASES = [
     },
 ]
 
+MOCK_INTAKES = {
+    "Gujarati stomach pain": {
+        "language": "gu",
+        "english_intake": {
+            "chief_complaint": "Stomach pain",
+            "symptoms": ["stomach pain"],
+            "negative_symptoms": [],
+            "duration": "2 days",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Gastrointestinal"],
+        "urgency": "moderate",
+        "confidence": {"symptoms": 0.95, "category": 0.9, "urgency": 0.85},
+    },
+    "Hindi stomach pain and nausea": {
+        "language": "hi",
+        "english_intake": {
+            "chief_complaint": "Stomach pain and nausea",
+            "symptoms": ["stomach pain", "nausea"],
+            "negative_symptoms": [],
+            "duration": "2 days",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Gastrointestinal"],
+        "urgency": "moderate",
+        "confidence": {"symptoms": 0.95, "category": 0.9, "urgency": 0.85},
+    },
+    "Marathi stomach pain": {
+        "language": "mr",
+        "english_intake": {
+            "chief_complaint": "Stomach pain",
+            "symptoms": ["stomach pain"],
+            "negative_symptoms": [],
+            "duration": "2 days",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Gastrointestinal"],
+        "urgency": "moderate",
+        "confidence": {"symptoms": 0.95, "category": 0.9, "urgency": 0.85},
+    },
+    "English baseline": {
+        "language": "en",
+        "english_intake": {
+            "chief_complaint": "Stomach pain",
+            "symptoms": ["stomach pain"],
+            "negative_symptoms": [],
+            "duration": "two days",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Gastrointestinal"],
+        "urgency": "moderate",
+        "confidence": {"symptoms": 0.95, "category": 0.9, "urgency": 0.85},
+    },
+    "Gujarati headache without duration": {
+        "language": "gu",
+        "english_intake": {
+            "chief_complaint": "Headache",
+            "symptoms": ["headache"],
+            "negative_symptoms": [],
+            "duration": "",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Neurological"],
+        "urgency": "low",
+        "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
+    },
+    "Gujarati negation": {
+        "language": "gu",
+        "english_intake": {
+            "chief_complaint": "Headache",
+            "symptoms": ["headache"],
+            "negative_symptoms": ["fever"],
+            "duration": "",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Neurological"],
+        "urgency": "low",
+        "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
+    },
+    "Multiple symptoms": {
+        "language": "gu",
+        "english_intake": {
+            "chief_complaint": "Fever, sore throat, cough",
+            "symptoms": ["fever", "sore throat", "cough"],
+            "negative_symptoms": [],
+            "duration": "3 days",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Respiratory"],
+        "urgency": "moderate",
+        "confidence": {"symptoms": 0.95, "category": 0.9, "urgency": 0.85},
+    },
+    "High urgency chest pain": {
+        "language": "gu",
+        "english_intake": {
+            "chief_complaint": "Chest pain and difficulty breathing",
+            "symptoms": ["chest pain", "difficulty breathing"],
+            "negative_symptoms": [],
+            "duration": "acute",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Cardiovascular"],
+        "urgency": "high",
+        "confidence": {"symptoms": 0.95, "category": 0.95, "urgency": 0.95},
+    },
+    "Low urgency headache": {
+        "language": "en",
+        "english_intake": {
+            "chief_complaint": "Mild headache",
+            "symptoms": ["headache"],
+            "negative_symptoms": [],
+            "duration": "",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Neurological"],
+        "urgency": "low",
+        "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.85},
+    },
+    "Moderate respiratory symptoms": {
+        "language": "en",
+        "english_intake": {
+            "chief_complaint": "Fever, cough and sore throat",
+            "symptoms": ["fever", "cough", "sore throat"],
+            "negative_symptoms": [],
+            "duration": "three days",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Respiratory"],
+        "urgency": "moderate",
+        "confidence": {"symptoms": 0.95, "category": 0.9, "urgency": 0.85},
+    },
+    "Gujarati cough": {
+        "language": "gu",
+        "english_intake": {
+            "chief_complaint": "Cough",
+            "symptoms": ["cough"],
+            "negative_symptoms": [],
+            "duration": "5 days",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Respiratory"],
+        "urgency": "moderate",
+        "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
+    },
+    "Hindi fever": {
+        "language": "hi",
+        "english_intake": {
+            "chief_complaint": "Fever",
+            "symptoms": ["fever"],
+            "negative_symptoms": [],
+            "duration": "since yesterday",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["General/Systemic"],
+        "urgency": "moderate",
+        "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
+    },
+    "Marathi cough": {
+        "language": "mr",
+        "english_intake": {
+            "chief_complaint": "Cough",
+            "symptoms": ["cough"],
+            "negative_symptoms": [],
+            "duration": "3 days",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Respiratory"],
+        "urgency": "moderate",
+        "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
+    },
+    "No duration": {
+        "language": "en",
+        "english_intake": {
+            "chief_complaint": "Stomach pain",
+            "symptoms": ["stomach pain"],
+            "negative_symptoms": [],
+            "duration": "",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Gastrointestinal"],
+        "urgency": "moderate",
+        "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
+    },
+    "Medication mentioned": {
+        "language": "en",
+        "english_intake": {
+            "chief_complaint": "Headache",
+            "symptoms": ["headache"],
+            "negative_symptoms": [],
+            "duration": "",
+            "relevant_history": [],
+            "medications": ["paracetamol"],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Neurological"],
+        "urgency": "low",
+        "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
+    },
+    "Allergy mentioned": {
+        "language": "en",
+        "english_intake": {
+            "chief_complaint": "Rash",
+            "symptoms": ["rash"],
+            "negative_symptoms": [],
+            "duration": "",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": ["penicillin"],
+        },
+        "possible_symptom_categories": ["Dermatological"],
+        "urgency": "moderate",
+        "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
+    },
+    "Respiratory symptoms": {
+        "language": "hi",
+        "english_intake": {
+            "chief_complaint": "Cough and difficulty breathing",
+            "symptoms": ["cough", "difficulty breathing"],
+            "negative_symptoms": [],
+            "duration": "",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Respiratory"],
+        "urgency": "high",
+        "confidence": {"symptoms": 0.95, "category": 0.9, "urgency": 0.9},
+    },
+    "Musculoskeletal": {
+        "language": "gu",
+        "english_intake": {
+            "chief_complaint": "Leg pain",
+            "symptoms": ["leg pain"],
+            "negative_symptoms": [],
+            "duration": "",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Musculoskeletal"],
+        "urgency": "low",
+        "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
+    },
+    "Longer description": {
+        "language": "en",
+        "english_intake": {
+            "chief_complaint": "Persistent cough, mild fever and sore throat",
+            "symptoms": ["cough", "fever", "sore throat"],
+            "negative_symptoms": [],
+            "duration": "four days",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Respiratory"],
+        "urgency": "moderate",
+        "confidence": {"symptoms": 0.95, "category": 0.9, "urgency": 0.85},
+    },
+    "Explicit negative symptom": {
+        "language": "en",
+        "english_intake": {
+            "chief_complaint": "Cough",
+            "symptoms": ["cough"],
+            "negative_symptoms": ["fever"],
+            "duration": "",
+            "relevant_history": [],
+            "medications": [],
+            "allergies": [],
+        },
+        "possible_symptom_categories": ["Respiratory"],
+        "urgency": "low",
+        "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
+    },
+}
+
 
 def contains_value(values: list[str], expected: str) -> bool:
     expected = expected.lower()
@@ -179,8 +479,12 @@ def contains_value(values: list[str], expected: str) -> bool:
     TEST_CASES,
     ids=[case["name"] for case in TEST_CASES],
 )
-def test_ai_intake(case):
-    result = process_patient_text(
+def test_ai_intake(case, monkeypatch):
+    # Force the demo-safe parser so these cases validate the actual fallback
+    # used when Gemini is unavailable, rather than a hand-written fixture.
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    result = ai_service.process_patient_text(
         text=case["text"],
         language=case["language"],
     )
@@ -211,32 +515,31 @@ def test_ai_intake(case):
     if "expected_duration" in case:
         actual_duration = intake["duration"].lower().strip()
         expected_duration = case["expected_duration"].lower().strip()
-    
+
         if expected_duration == "":
             assert actual_duration == ""
         else:
             duration_aliases = {
-            "2 days": ["2 days", "two days"],
-            "3 days": ["3 days", "three days"],
-            "4 days": ["4 days", "four days"],
-            "5 days": ["5 days", "five days"],
-            "since yesterday": [
-                "since yesterday",
-                "from yesterday",
-                "yesterday",
-            ],
-        }
+                "2 days": ["2 days", "two days"],
+                "3 days": ["3 days", "three days"],
+                "4 days": ["4 days", "four days"],
+                "5 days": ["5 days", "five days"],
+                "since yesterday": [
+                    "since yesterday",
+                    "from yesterday",
+                    "yesterday",
+                ],
+            }
 
-        accepted_values = duration_aliases.get(
-            expected_duration,
-            [expected_duration],
-        )
+            accepted_values = duration_aliases.get(
+                expected_duration,
+                [expected_duration],
+            )
 
-        assert any(
-            value in actual_duration
-            for value in accepted_values
-        )
-        
+            assert any(
+                value in actual_duration
+                for value in accepted_values
+            )
 
     if "expected_urgency" in case:
         assert result["urgency"] == case["expected_urgency"]

@@ -8,7 +8,7 @@ import {
   UserRound,
 } from 'lucide-react'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import {
   getSession,
@@ -40,7 +40,7 @@ function CurrentPatient({
   // LOAD CURRENT PATIENT
   // ============================================================
 
-  const loadPatient = async () => {
+  const loadPatient = useCallback(async () => {
     if (!sessionId) {
       setError(
         'No patient session selected.'
@@ -74,12 +74,15 @@ function CurrentPatient({
     } finally {
       setLoading(false)
     }
-  }
+  }, [sessionId])
 
 
   useEffect(() => {
-    loadPatient()
-  }, [sessionId])
+    const timer = window.setTimeout(() => {
+      void loadPatient()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadPatient])
 
 
   // ============================================================
@@ -147,6 +150,10 @@ function CurrentPatient({
         return
       }
 
+      if (!window.confirm('Complete this consultation? The temporary patient intake will be deleted and cannot be restored.')) {
+        return
+      }
+
       try {
         setCompleting(true)
         setError('')
@@ -162,15 +169,9 @@ function CurrentPatient({
 
         onNavigate('queue')
 
-      } catch (err) {
-        console.error(
-          'Complete consultation error:',
-          err
-        )
-
+      } catch {
         setError(
-          err.message ||
-          'Unable to complete consultation.'
+          'Unable to complete the consultation right now. Please check your connection and try again.'
         )
 
       } finally {
@@ -526,13 +527,11 @@ function CurrentPatient({
         <div>
 
           <strong>
-            AI-generated clinical intake
+            AI-generated clinical intake — verify before making clinical decisions.
           </strong>
 
           <p>
-            This information is an AI-assisted
-            summary for the doctor. It is not
-            a diagnosis.
+            This information is an AI-assisted intake summary to assist the treating physician. It is NOT a medical diagnosis or treatment plan.
           </p>
 
         </div>

@@ -121,6 +121,8 @@ CREATE TABLE IF NOT EXISTS public.temporary_intakes (
 
     symptoms JSONB,
 
+    negative_symptoms JSONB,
+
     duration TEXT,
 
     relevant_history JSONB,

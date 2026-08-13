@@ -16,6 +16,11 @@ const LANGUAGES = [
   { code: 'en', label: 'English',  english: 'English' },
 ]
 
+const SPEECH_LOCALES = {
+  gu: 'gu-IN', hi: 'hi-IN', mr: 'mr-IN', ta: 'ta-IN', te: 'te-IN',
+  kn: 'kn-IN', ml: 'ml-IN', bn: 'bn-IN', pa: 'pa-IN', en: 'en-IN',
+}
+
 function formatDuration(secs) {
   const m = String(Math.floor(secs / 60)).padStart(2, '0')
   const s = String(secs % 60).padStart(2, '0')
@@ -42,8 +47,10 @@ export default function SymptomInput() {
   const [recError, setRecError] = useState('')
   const [duration, setDuration] = useState(0)
   const [audioBlob, setAudioBlob] = useState(null)
+  const [transcript, setTranscript] = useState('')
 
   const mediaRecorderRef = useRef(null)
+  const recognitionRef = useRef(null)
   const chunksRef = useRef([])
   const timerRef = useRef(null)
 
@@ -64,8 +71,13 @@ export default function SymptomInput() {
   async function startRecording() {
     setRecError('')
     setDuration(0)
+    setTranscript('')
     chunksRef.current = []
     try {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+      if (!SpeechRecognition) {
+        throw new Error('SpeechRecognitionUnavailable')
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mr = new MediaRecorder(stream)
       mediaRecorderRef.current = mr
@@ -77,11 +89,31 @@ export default function SymptomInput() {
         setRecState('done')
       }
       mr.start(250) // collect chunks every 250ms
+      const recognition = new SpeechRecognition()
+      recognition.lang = SPEECH_LOCALES[language] || 'en-IN'
+      recognition.continuous = true
+      recognition.interimResults = true
+      recognition.onresult = event => {
+        let nextTranscript = ''
+        for (let index = 0; index < event.results.length; index += 1) {
+          nextTranscript += event.results[index][0].transcript
+        }
+        setTranscript(nextTranscript.trim())
+      }
+      recognition.onerror = event => {
+        if (event.error !== 'aborted' && event.error !== 'no-speech') {
+          setRecError('Voice transcription was interrupted. Please try again or type your symptoms.')
+        }
+      }
+      recognitionRef.current = recognition
+      recognition.start()
       setRecState('recording')
       timerRef.current = setInterval(() => setDuration(d => d + 1), 1000)
     } catch (err) {
       const msg = String(err)
-      if (msg.includes('Permission') || msg.includes('NotAllowed')) {
+      if (msg.includes('SpeechRecognitionUnavailable')) {
+        setRecError('Voice-to-text is available in recent Chrome and Edge browsers. Please type your symptoms on this browser.')
+      } else if (msg.includes('Permission') || msg.includes('NotAllowed')) {
         setRecError('Microphone permission denied. Please allow microphone access and try again.')
       } else if (msg.includes('NotFound')) {
         setRecError('No microphone found on this device.')
@@ -95,6 +127,7 @@ export default function SymptomInput() {
   function stopRecording() {
     clearInterval(timerRef.current)
     mediaRecorderRef.current?.stop()
+    recognitionRef.current?.stop()
   }
 
   function resetRecording() {
@@ -103,15 +136,22 @@ export default function SymptomInput() {
     const mr = mediaRecorderRef.current
     if (mr && mr.state !== 'inactive') mr.stop()
     mediaRecorderRef.current = null
+    recognitionRef.current?.abort()
+    recognitionRef.current = null
     setAudioBlob(null)
+    setTranscript('')
     setDuration(0)
     setRecState('idle')
     setRecError('')
   }
 
   function handleVoiceContinue() {
+    if (!transcript.trim()) {
+      setRecError('We could not transcribe that recording. Please record again or type your symptoms.')
+      return
+    }
     navigate(`/review/${doctorCode}`, {
-      state: { type: 'voice', audioBlob, duration, language, sessionId, doctorName },
+      state: { type: 'voice', text: transcript.trim(), audioBlob, duration, language, sessionId, doctorName },
     })
   }
 
@@ -206,6 +246,7 @@ export default function SymptomInput() {
                   <p style={s.doneMeta}>{formatDuration(duration)} · {selectedLang.english}</p>
                 </div>
               </div>
+              {transcript && <p style={s.transcript}>“{transcript}”</p>}
               <div style={s.voiceActions}>
                 <button style={s.secondaryBtn} onClick={resetRecording}>
                   <RotateCcw size={15} /> Record Again
@@ -295,4 +336,5 @@ const s = {
   doneTitle: { margin: '0 0 2px', fontSize: 15, fontWeight: 600, color: 'var(--text-h)' },
   doneMeta: { margin: 0, fontSize: 13, color: 'var(--text)' },
   voiceActions: { display: 'flex', gap: 10, width: '100%' },
+  transcript: { margin: 0, width: '100%', color: 'var(--text-h)', fontSize: 14, lineHeight: 1.5 },
 }
