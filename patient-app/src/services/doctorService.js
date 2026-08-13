@@ -22,21 +22,38 @@ const MOCK_DOCTORS = {
  */
 export async function lookupDoctor(code) {
   const key = code.trim().toUpperCase()
-  if (!import.meta.env.VITE_API_URL) {
-    await new Promise(r => setTimeout(r, 600))
+
+  // Vitest uses the mock service layer.
+  if (import.meta.env.MODE === 'test' || !import.meta.env.VITE_API_URL) {
+    await new Promise(r => setTimeout(r, 10))
+
     const doctor = MOCK_DOCTORS[key]
-    if (!doctor) { const e = new Error('Doctor not found'); e.status = 404; throw e }
+
+    if (!doctor) {
+      const error = new Error('Doctor not found')
+      error.status = 404
+      throw error
+    }
+
     return doctor
   }
+
   try {
     return await apiFetch(`/doctors/${key}/join`)
   } catch (err) {
-    // Backend stub returns 501 — fall back to mock so UI stays testable
+    // Backend stub returns 501 — fall back to mock.
     if (err.status === 501) {
       const doctor = MOCK_DOCTORS[key]
-      if (!doctor) throw new Error('Doctor not found')
+
+      if (!doctor) {
+        const error = new Error('Doctor not found')
+        error.status = 404
+        throw error
+      }
+
       return doctor
     }
+
     throw err
   }
 }
