@@ -92,10 +92,11 @@ def get_doctor_sessions(
     doctor_id: str,
 ) -> list[dict]:
     """
-    Return all active consultation sessions
-    belonging to a doctor.
+    Return only patients that have completed the
+    AI intake processing and are ready for consultation.
 
-    Completed and cancelled sessions are excluded.
+    Waiting / processing patients are intentionally excluded.
+    Completed / cancelled patients are also excluded.
     """
 
     response = (
@@ -103,15 +104,7 @@ def get_doctor_sessions(
         .table("active_sessions")
         .select("*")
         .eq("doctor_id", doctor_id)
-        .in_(
-            "status",
-            [
-                "waiting",
-                "processing",
-                "ready",
-                "active",
-            ],
-        )
+        .eq("status", "ready")
         .order(
             "created_at",
             desc=False,

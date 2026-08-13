@@ -1,56 +1,108 @@
-const API_URL =
-    import.meta.env.VITE_API_URL ||
-    'http://127.0.0.1:8000'
+const API_BASE_URL = 'http://127.0.0.1:8000'
 
-export async function apiFetch(
-    path,
-    options = {},
-) {
-    const token = localStorage.getItem(
-        'vaanidoc_access_token',
+
+// ============================================================
+// GET AUTH TOKEN
+// ============================================================
+
+function getToken() {
+    return localStorage.getItem(
+        'vaanidoc_access_token'
     )
+}
 
-    const headers = {
-        ...(options.body
-            ? {
-                'Content-Type':
-                    'application/json',
-            }
-            : {}),
-        ...(options.headers || {}),
-    }
 
-    if (token) {
-        headers.Authorization =
-            `Bearer ${token}`
-    }
+// ============================================================
+// GENERIC API REQUEST
+// ============================================================
+
+export async function apiRequest(
+    url,
+    options = {}
+) {
+    const token = getToken()
 
     const response = await fetch(
-        `${API_URL}${path}`,
+        `${API_BASE_URL}${url}`,
         {
             ...options,
-            headers,
-        },
+
+            headers: {
+                ...(options.body
+                    ? {
+                        'Content-Type':
+                            'application/json',
+                    }
+                    : {}),
+
+                ...(token
+                    ? {
+                        Authorization:
+                            `Bearer ${token}`,
+                    }
+                    : {}),
+
+                ...(options.headers || {}),
+            },
+        }
     )
+
+    const text = await response.text()
 
     let data = null
 
     try {
-        data = await response.json()
+        data = text
+            ? JSON.parse(text)
+            : null
     } catch {
-        // No JSON body.
+        data = text
     }
 
     if (!response.ok) {
-        const error = new Error(
+        throw new Error(
             data?.detail ||
-            `Request failed (${response.status})`,
+            `Request failed with status ${response.status}`
         )
-
-        error.status = response.status
-
-        throw error
     }
 
     return data
 }
+
+
+// ============================================================
+// COMPATIBILITY API FETCH
+// ============================================================
+//
+// Some existing dashboard components use apiFetch()
+// while the newer session service uses apiRequest().
+//
+// Keep both available so the existing components continue
+// working without changing every import.
+//
+
+export async function apiFetch(
+    url,
+    options = {}
+) {
+    return apiRequest(
+        url,
+        options
+    )
+}
+
+
+// ============================================================
+// AUTH TOKEN
+// ============================================================
+
+export function getAuthToken() {
+    return getToken()
+}
+
+
+// ============================================================
+// API BASE URL
+// ============================================================
+
+export { API_BASE_URL }

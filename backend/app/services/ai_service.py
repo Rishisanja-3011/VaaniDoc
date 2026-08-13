@@ -5,8 +5,10 @@ from dotenv import load_dotenv
 from google import genai
 from pydantic import BaseModel, Field, ValidationError
 
+
 BASE_DIR = Path(__file__).resolve().parents[3]
 load_dotenv(BASE_DIR / ".env")
+
 MODEL_NAME = "gemini-2.5-flash"
 
 
@@ -39,62 +41,60 @@ class ClinicalIntake(BaseModel):
 
 
 SYSTEM_PROMPT = """
-You are VaaniDoc, a multilingual health intake assistant.
+You are VaaniDoc, a multilingual clinical intake extraction assistant.
 
-Convert the patient's description into a structured clinical intake
-for a doctor.
+You receive a patient's message in Hindi, Gujarati, Marathi, English,
+or another Indian regional language.
+
+Your job is to understand the patient's message and produce a
+structured clinical intake in ENGLISH.
 
 IMPORTANT RULES:
 
-1. Understand Indian regional languages including Gujarati, Hindi,
-   Marathi, and English.
+1. Understand the patient's original language semantically.
 
-2. Translate and normalize the patient's meaning into English.
+2. Translate the meaning internally into English before filling
+   english_intake.
 
-3. Extract ONLY information explicitly supported by the patient's input.
+3. Every field inside english_intake MUST be written in English.
 
-4. Never infer or invent symptoms, history, medications, allergies,
-   duration, severity, or other clinical facts.
+4. Never copy a regional-language sentence into chief_complaint.
 
-5. Duration must be copied or normalized ONLY when the patient explicitly
-   states a duration or time period.
+5. Extract ONLY information explicitly stated by the patient.
 
-6. Words such as "today", "now", "currently", "recently", or similar
-   expressions MUST NOT be converted into a duration unless the patient
-   explicitly gives a measurable time period.
+6. NEVER invent symptoms, diseases, duration, medical history,
+   medications, allergies, severity, or other clinical information.
 
-7. If the patient does not explicitly state how long a symptom has been
-   present, return duration as an empty string "".
+7. If information is missing:
+   - missing string = ""
+   - missing list = []
 
-8. Do not infer duration from grammatical tense or context.
+8. Symptoms must be individual English symptom descriptions.
 
-9. Extract medications only when explicitly mentioned.
+9. chief_complaint must be a short English description of the
+   patient's main complaint.
 
-10. Extract allergies only when explicitly mentioned.
+10. If the patient explicitly mentions a duration, translate it
+    into English.
 
-11. Identify possible symptom categories, NOT diseases.
+11. If the patient does not mention a duration:
+    "duration": ""
 
-12. Classify urgency as exactly one of:
-    low, moderate, high.
+12. Extract medications ONLY if explicitly mentioned.
 
-13. This is NOT a diagnosis.
+13. Extract allergies ONLY if explicitly mentioned.
 
-14. Do not provide treatment recommendations.
+14. Extract relevant medical history ONLY if explicitly mentioned.
 
-15. If information is missing, use an empty string or empty list.
+15. Extract explicitly denied symptoms into negative_symptoms.
 
-16. Confidence values must be between 0 and 1.
+16. Never invent negative symptoms.
 
-17. When the patient explicitly denies a symptom, put that symptom
-    in negative_symptoms.
+17. possible_symptom_categories must contain symptom categories,
+    NOT diagnoses.
 
-18. Do not place explicitly denied symptoms inside symptoms.
+Allowed categories:
 
-19. Do not invent negative symptoms that the patient did not mention.
-
-20. Return structured JSON matching the requested schema.
-
-Possible symptom categories include:
 - Gastrointestinal
 - Respiratory
 - Cardiovascular
@@ -105,12 +105,123 @@ Possible symptom categories include:
 - ENT
 - General/Systemic
 - Other
+
+18. urgency MUST be exactly one of:
+
+- low
+- moderate
+- high
+
+19. This system does not diagnose diseases.
+
+20. Do not provide treatment recommendations.
+
+21. Confidence values must be between 0 and 1.
+
+22. Confidence represents extraction confidence,
+    NOT medical certainty.
+
+IMPORTANT LANGUAGE EXAMPLES:
+
+Hindi:
+
+"मुझे बुखार है"
+means:
+"I have fever"
+
+"मुझे सिरदर्द है"
+means:
+"I have a headache"
+
+"मुझे कल से बुखार और सिरदर्द है"
+means:
+"I have had fever and headache since yesterday"
+
+"मुझे पेट में दर्द है"
+means:
+"I have stomach pain"
+
+"मुझे खांसी है"
+means:
+"I have a cough"
+
+"मुझे उल्टी हो रही है"
+means:
+"I am vomiting"
+
+"मुझे दस्त हैं"
+means:
+"I have diarrhea"
+
+Gujarati:
+
+"મને તાવ છે"
+means:
+"I have fever"
+
+"મને માથાનો દુખાવો છે"
+means:
+"I have a headache"
+
+Marathi:
+
+"मला ताप आहे"
+means:
+"I have fever"
+
+"मला डोकेदुखी आहे"
+means:
+"I have a headache"
+
+Always understand the actual patient input.
+The examples are only language-understanding examples.
+
+EXAMPLE:
+
+Patient language:
+hi
+
+Patient input:
+मुझे कल से बुखार और सिरदर्द है।
+
+Return:
+
+{
+  "language": "hi",
+  "english_intake": {
+    "chief_complaint": "Fever and headache",
+    "symptoms": [
+      "fever",
+      "headache"
+    ],
+    "negative_symptoms": [],
+    "duration": "since yesterday",
+    "relevant_history": [],
+    "medications": [],
+    "allergies": []
+  },
+  "possible_symptom_categories": [
+    "General/Systemic",
+    "Neurological"
+  ],
+  "urgency": "moderate",
+  "confidence": {
+    "symptoms": 0.95,
+    "category": 0.9,
+    "urgency": 0.8
+  }
+}
+
+Return ONLY valid JSON matching the requested schema.
 """
 
 
 def process_patient_text(text: str, language: str) -> dict:
-    if not text.strip():
+    if not text or not text.strip():
         raise ValueError("Patient input cannot be empty.")
+
+    if not language or not language.strip():
+        raise ValueError("Patient language cannot be empty.")
 
     api_key = os.getenv("GEMINI_API_KEY")
 
@@ -122,14 +233,33 @@ def process_patient_text(text: str, language: str) -> dict:
     try:
         client = genai.Client(api_key=api_key)
 
+        patient_prompt = f"""
+Patient language: {language}
+
+Patient input:
+{text}
+
+Understand the patient's message in its original language.
+
+Translate its meaning internally into English.
+
+Extract only explicitly stated clinical information.
+
+IMPORTANT:
+The output must contain actual English values inside
+english_intake.
+
+Do not return empty fields when the patient's message
+clearly contains the corresponding information.
+
+Return the structured English clinical intake.
+"""
+
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=[
                 SYSTEM_PROMPT,
-                (
-                    f"Patient language: {language}\n\n"
-                    f"Patient input:\n{text}"
-                ),
+                patient_prompt,
             ],
             config={
                 "response_mime_type": "application/json",
@@ -138,6 +268,14 @@ def process_patient_text(text: str, language: str) -> dict:
             },
         )
 
+        if not response.text:
+            raise AIProcessingError(
+                "Gemini returned an empty response."
+            )
+
+        print("GEMINI RAW RESPONSE:")
+        print(response.text)
+
         result = ClinicalIntake.model_validate_json(
             response.text
         )
@@ -145,9 +283,17 @@ def process_patient_text(text: str, language: str) -> dict:
         return result.model_dump()
 
     except ValidationError as exc:
+        print(
+            "GEMINI VALIDATION ERROR:",
+            exc,
+        )
+
         raise AIProcessingError(
             "Gemini returned an invalid clinical intake structure."
         ) from exc
+
+    except AIProcessingError:
+        raise
 
     except Exception as exc:
         print(

@@ -6,11 +6,15 @@ from app.services.ai_service import (
     AIProcessingError,
     process_patient_text,
 )
+
 from app.services.session_service import (
     get_session,
     save_intake,
     update_session_status,
 )
+
+from app.core.supabase import supabase_admin
+
 
 router = APIRouter(
     prefix="/processing",
@@ -51,18 +55,15 @@ class ClinicalIntake(BaseModel):
 
 def restore_session_to_active(session_id: str) -> None:
     """
-    Best-effort recovery if AI processing fails.
-
-    Prevents a consultation from being permanently stuck
-    in the 'processing' state.
+    Best-effort recovery if processing fails.
     """
+
     try:
         update_session_status(
             session_id,
             "active",
         )
     except Exception:
-        # Preserve the original processing error.
         pass
 
 
@@ -78,18 +79,36 @@ async def process_text(
     request: ProcessTextRequest,
 ):
     """
-    Direct AI processing endpoint.
+    Process text directly using the AI service.
 
-    Useful for development/testing.
+    This endpoint is useful for testing the AI pipeline
+    independently from session/database handling.
     """
+
+    text = request.text.strip()
+    language = request.language.strip().lower()
+
+    if not text:
+        raise HTTPException(
+            status_code=400,
+            detail="Text cannot be empty.",
+        )
+
+    if not language:
+        raise HTTPException(
+            status_code=400,
+            detail="Language cannot be empty.",
+        )
 
     try:
         result = process_patient_text(
-            text=request.text,
-            language=request.language,
+            text=text,
+            language=language,
         )
 
-        return ClinicalIntake(**result)
+        return ClinicalIntake(
+            **result
+        )
 
     except ValueError as exc:
         raise HTTPException(
@@ -101,6 +120,12 @@ async def process_text(
         raise HTTPException(
             status_code=502,
             detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI processing failed: {exc}",
         ) from exc
 
 
@@ -116,21 +141,26 @@ async def process_session(
     session_id: str,
 ):
     """
-    Process the latest patient input belonging to a temporary
-    consultation session.
+    Process the latest patient input for a consultation session.
 
-    No doctor authentication is required here because the
-    temporary session_id identifies the consultation.
+    Flow:
 
-    Doctor authorization is enforced separately on
-    doctor-facing session endpoints.
+        temporary_inputs
+              ↓
+        AI processing
+              ↓
+        temporary_intakes
+              ↓
+        session = ready
     """
 
     # --------------------------------------------------------
-    # 1. Find session
+    # 1. GET SESSION
     # --------------------------------------------------------
 
-    session = get_session(session_id)
+    session = get_session(
+        session_id
+    )
 
     if session is None:
         raise HTTPException(
@@ -139,7 +169,7 @@ async def process_session(
         )
 
     # --------------------------------------------------------
-    # 2. Reject closed sessions
+    # 2. CHECK SESSION STATUS
     # --------------------------------------------------------
 
     if session["status"] in {
@@ -152,17 +182,18 @@ async def process_session(
         )
 
     # --------------------------------------------------------
-    # 3. Read latest temporary patient input
+    # 3. GET LATEST PATIENT INPUT
     # --------------------------------------------------------
 
     try:
-        from app.core.supabase import supabase_admin
-
         input_response = (
             supabase_admin
             .table("temporary_inputs")
             .select("*")
-            .eq("session_id", session_id)
+            .eq(
+                "session_id",
+                session_id,
+            )
             .order(
                 "created_at",
                 desc=True,
@@ -186,33 +217,91 @@ async def process_session(
     patient_input = input_response.data[0]
 
     # --------------------------------------------------------
-    # 4. Validate patient input
+    # 4. EXTRACT INPUT
     # --------------------------------------------------------
 
-    text = patient_input.get("text_content")
-    language = patient_input.get("language")
+    text = patient_input.get(
+        "text_content"
+    )
+
+    language = patient_input.get(
+        "language"
+    )
+
+    if text is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Patient input text is missing.",
+        )
+
+    if not isinstance(text, str):
+        text = str(text)
+
+    text = text.strip()
 
     if not text:
         raise HTTPException(
             status_code=400,
-            detail="Patient input does not contain text.",
+            detail="Patient input text is empty.",
         )
 
-    if not language:
+    if language is None:
         raise HTTPException(
             status_code=400,
             detail="Patient input language is missing.",
         )
 
+    language = str(
+        language
+    ).strip().lower()
+
+    if not language:
+        raise HTTPException(
+            status_code=400,
+            detail="Patient input language is empty.",
+        )
+
     # --------------------------------------------------------
-    # 5. AI processing
+    # DEBUG LOG
+    # --------------------------------------------------------
+
+    print(
+        "\n"
+        "============================================================\n"
+        "SESSION AI PROCESSING\n"
+        "============================================================"
+    )
+
+    print(
+        f"session_id : {session_id}"
+    )
+
+    print(
+        f"language   : {language}"
+    )
+
+    print(
+        f"text       : {text!r}"
+    )
+
+    print(
+        "============================================================\n"
+    )
+
+    # --------------------------------------------------------
+    # 5. MARK PROCESSING
     # --------------------------------------------------------
 
     try:
+
         update_session_status(
             session_id,
             "processing",
         )
+
+        # ----------------------------------------------------
+        # 6. RUN AI
+        # ----------------------------------------------------
 
         result = process_patient_text(
             text=text,
@@ -220,7 +309,7 @@ async def process_session(
         )
 
         # ----------------------------------------------------
-        # 6. Save structured AI intake
+        # 7. SAVE AI INTAKE
         # ----------------------------------------------------
 
         saved_intake = save_intake(
@@ -234,24 +323,35 @@ async def process_session(
             )
 
         # ----------------------------------------------------
-        # 7. Mark session ready for doctor
+        # 8. MARK READY
         # ----------------------------------------------------
 
-        update_session_status(
+        ready_session = update_session_status(
             session_id,
             "ready",
         )
 
-        return ClinicalIntake(**result)
+        if ready_session is None:
+            raise RuntimeError(
+                "Failed to update session status to ready."
+            )
+
+        # ----------------------------------------------------
+        # 9. RETURN RESULT
+        # ----------------------------------------------------
+
+        return ClinicalIntake(
+            **result
+        )
 
     # --------------------------------------------------------
-    # AI validation error
+    # AI VALIDATION ERROR
     # --------------------------------------------------------
 
     except ValueError as exc:
 
         restore_session_to_active(
-            session_id,
+            session_id
         )
 
         raise HTTPException(
@@ -260,13 +360,13 @@ async def process_session(
         ) from exc
 
     # --------------------------------------------------------
-    # Gemini/API processing error
+    # GEMINI / AI ERROR
     # --------------------------------------------------------
 
     except AIProcessingError as exc:
 
         restore_session_to_active(
-            session_id,
+            session_id
         )
 
         raise HTTPException(
@@ -275,13 +375,13 @@ async def process_session(
         ) from exc
 
     # --------------------------------------------------------
-    # Supabase/database error
+    # DATABASE ERROR
     # --------------------------------------------------------
 
     except APIError as exc:
 
         restore_session_to_active(
-            session_id,
+            session_id
         )
 
         raise HTTPException(
@@ -290,16 +390,31 @@ async def process_session(
         ) from exc
 
     # --------------------------------------------------------
-    # Other processing error
+    # OTHER PROCESSING ERROR
     # --------------------------------------------------------
 
     except RuntimeError as exc:
 
         restore_session_to_active(
-            session_id,
+            session_id
         )
 
         raise HTTPException(
             status_code=503,
             detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+
+        restore_session_to_active(
+            session_id
+        )
+
+        print(
+            f"Unexpected session processing error: {exc}"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unexpected AI processing error.",
         ) from exc

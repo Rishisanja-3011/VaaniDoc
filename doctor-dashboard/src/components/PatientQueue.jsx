@@ -31,6 +31,7 @@ function PatientQueue({ onNavigate }) {
       const response = await fetch(
         `${API_BASE_URL}/sessions/queue`,
         {
+          method: 'GET',
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -38,18 +39,33 @@ function PatientQueue({ onNavigate }) {
       )
 
       if (!response.ok) {
-        throw new Error(
-          `Unable to load patient queue (${response.status}).`,
-        )
+        let message = `Unable to load patient queue (${response.status}).`
+
+        try {
+          const data = await response.json()
+
+          if (data?.detail) {
+            message = data.detail
+          }
+        } catch {
+          // Keep default error message.
+        }
+
+        throw new Error(message)
       }
 
       const data = await response.json()
 
       setPatients(data.patients || [])
     } catch (err) {
-      console.error('Queue loading error:', err)
+      console.error(
+        'Queue loading error:',
+        err,
+      )
+
       setError(
-        err.message || 'Unable to load patient queue.',
+        err.message ||
+        'Unable to load patient queue.',
       )
     } finally {
       setLoading(false)
@@ -61,9 +77,12 @@ function PatientQueue({ onNavigate }) {
   }, [])
 
   const handleViewPatient = (sessionId) => {
-    onNavigate('current-patient', {
-      sessionId,
-    })
+    onNavigate(
+      'current-patient',
+      {
+        sessionId,
+      },
+    )
   }
 
   const formatLanguage = (language) => {
@@ -74,7 +93,11 @@ function PatientQueue({ onNavigate }) {
       en: 'English',
     }
 
-    return languages[language] || language || 'Unknown'
+    return (
+      languages[language] ||
+      language ||
+      'Unknown'
+    )
   }
 
   const formatUrgency = (urgency) => {
@@ -90,15 +113,24 @@ function PatientQueue({ onNavigate }) {
 
   return (
     <div className="page-content">
+
+      {/* ================================================== */}
+      {/* PAGE HEADER */}
+      {/* ================================================== */}
+
       <section className="queue-page-header">
         <div>
-          <span className="eyebrow">PATIENT QUEUE</span>
+          <span className="eyebrow">
+            PATIENT QUEUE
+          </span>
 
-          <h3>Patients waiting for consultation</h3>
+          <h3>
+            Patients ready for consultation
+          </h3>
 
           <p>
-            Review the waiting queue and select the next
-            patient when you are ready.
+            Review the prepared patient intake and
+            select the next patient when you are ready.
           </p>
         </div>
 
@@ -118,12 +150,21 @@ function PatientQueue({ onNavigate }) {
         )}
       </section>
 
+      {/* ================================================== */}
+      {/* QUEUE */}
+      {/* ================================================== */}
+
       <section className="queue-list-section">
+
         <div className="section-heading">
           <div>
-            <span className="eyebrow">WAITING</span>
+            <span className="eyebrow">
+              READY
+            </span>
 
-            <h3>Consultation queue</h3>
+            <h3>
+              Consultation queue
+            </h3>
           </div>
 
           <span className="queue-count">
@@ -134,11 +175,15 @@ function PatientQueue({ onNavigate }) {
           </span>
         </div>
 
+        {/* LOADING */}
+
         {loading && (
           <div className="empty-state">
             Loading patient queue...
           </div>
         )}
+
+        {/* ERROR */}
 
         {!loading && error && (
           <div className="empty-state">
@@ -154,103 +199,163 @@ function PatientQueue({ onNavigate }) {
           </div>
         )}
 
-        {!loading && !error && patients.length === 0 && (
-          <div className="empty-state">
-            No patients are currently waiting.
-          </div>
-        )}
+        {/* EMPTY */}
 
-        {!loading && !error && patients.length > 0 && (
-          <div className="patient-queue-list">
-            {patients.map((patient, index) => {
-              const urgency = formatUrgency(
-                patient.urgency,
-              )
+        {!loading &&
+          !error &&
+          patients.length === 0 && (
+            <div className="empty-state">
+              No patients are currently ready
+              for consultation.
+            </div>
+          )}
 
-              return (
-                <article
-                  key={patient.session_id}
-                  className="patient-queue-item"
-                >
-                  <div className="queue-position">
-                    #{index + 1}
-                  </div>
+        {/* PATIENTS */}
 
-                  <div className="patient-avatar">
-                    <UserRound size={21} />
-                  </div>
+        {!loading &&
+          !error &&
+          patients.length > 0 && (
+            <div className="patient-queue-list">
 
-                  <div className="patient-queue-main">
-                    <div className="patient-queue-name">
-                      <strong>
-                        Patient #{String(index + 1).padStart(3, '0')}
-                      </strong>
+              {patients.map(
+                (patient, index) => {
+                  const urgency =
+                    formatUrgency(
+                      patient.urgency,
+                    )
 
-                      <span
-                        className={`status-badge ${patient.urgency ||
-                          'unknown'
-                          }`}
+                  return (
+                    <article
+                      key={
+                        patient.session_id
+                      }
+                      className="patient-queue-item"
+                    >
+
+                      {/* POSITION */}
+
+                      <div className="queue-position">
+                        #{index + 1}
+                      </div>
+
+                      {/* AVATAR */}
+
+                      <div className="patient-avatar">
+                        <UserRound
+                          size={21}
+                        />
+                      </div>
+
+                      {/* MAIN INFO */}
+
+                      <div className="patient-queue-main">
+
+                        <div className="patient-queue-name">
+
+                          <strong>
+                            Patient #
+                            {String(
+                              index + 1,
+                            ).padStart(
+                              3,
+                              '0',
+                            )}
+                          </strong>
+
+                          <span
+                            className={`status-badge ${patient.urgency ||
+                              'unknown'
+                              }`}
+                          >
+                            {urgency}
+                          </span>
+
+                        </div>
+
+                        <p>
+                          {patient.complaint ||
+                            'Complaint not available'}
+                        </p>
+
+                        <div className="patient-queue-meta">
+
+                          <span>
+                            <Languages
+                              size={14}
+                            />
+
+                            {formatLanguage(
+                              patient.language,
+                            )}
+                          </span>
+
+                          <span>
+                            <Clock3
+                              size={14}
+                            />
+
+                            Ready for consultation
+                          </span>
+
+                        </div>
+
+                      </div>
+
+                      {/* ACTION */}
+
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() =>
+                          handleViewPatient(
+                            patient.session_id,
+                          )
+                        }
                       >
-                        {urgency}
-                      </span>
-                    </div>
+                        View Patient
 
-                    <p>
-                      {patient.complaint ||
-                        'Complaint not available'}
-                    </p>
+                        <ArrowRight
+                          size={16}
+                        />
+                      </button>
 
-                    <div className="patient-queue-meta">
-                      <span>
-                        <Languages size={14} />
+                    </article>
+                  )
+                },
+              )}
 
-                        {formatLanguage(
-                          patient.language,
-                        )}
-                      </span>
+            </div>
+          )}
 
-                      <span>
-                        <Clock3 size={14} />
-
-                        Active consultation
-                      </span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() =>
-                      handleViewPatient(
-                        patient.session_id,
-                      )
-                    }
-                  >
-                    View Patient
-                    <ArrowRight size={16} />
-                  </button>
-                </article>
-              )
-            })}
-          </div>
-        )}
       </section>
 
+      {/* ================================================== */}
+      {/* PRIVACY */}
+      {/* ================================================== */}
+
       <section className="privacy-notice">
+
         <div className="privacy-notice-icon">
           <Clock3 size={19} />
         </div>
 
         <div>
-          <strong>Active session privacy</strong>
+
+          <strong>
+            Active session privacy
+          </strong>
 
           <p>
-            Patient information shown in this queue belongs
-            to active consultation sessions and is not
-            intended for permanent medical-record storage.
+            Patient information shown in this
+            queue belongs to active consultation
+            sessions and is not intended for
+            permanent medical-record storage.
           </p>
+
         </div>
+
       </section>
+
     </div>
   )
 }

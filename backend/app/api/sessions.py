@@ -160,6 +160,12 @@ async def join_consultation_session(
             detail="Unable to create consultation session.",
         ) from exc
 
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
     return {
         "session_id": session["session_id"],
         "doctor_id": doctor["id"],
@@ -170,6 +176,10 @@ async def join_consultation_session(
     }
 
 
+# ============================================================
+# PATIENT SUBMITS INPUT
+# ============================================================
+
 @router.post(
     "/{session_id}/input",
 )
@@ -179,6 +189,10 @@ async def submit_patient_input(
 ):
     """
     Patient submits temporary symptom information.
+
+    No doctor authentication is required.
+
+    The temporary session_id identifies the consultation.
     """
 
     session = get_session(session_id)
@@ -232,6 +246,117 @@ async def submit_patient_input(
 
 
 # ============================================================
+# PATIENT STATUS
+# ============================================================
+
+@router.get(
+    "/{session_id}/patient-status",
+)
+async def get_patient_session_status(
+    session_id: str,
+):
+    """
+    Patient-facing session status endpoint.
+
+    No doctor authentication is required.
+
+    The session UUID acts as the temporary capability
+    for the patient's active consultation.
+
+    This endpoint exposes ONLY session status.
+    It never exposes patient medical information.
+    """
+
+    session = get_session(session_id)
+
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found.",
+        )
+
+    return {
+        "session_id": session_id,
+        "status": session["status"],
+    }
+
+
+# ============================================================
+# PATIENT CANCEL
+# ============================================================
+
+@router.post(
+    "/{session_id}/patient-cancel",
+)
+async def patient_cancel_session(
+    session_id: str,
+):
+    """
+    Patient cancels their own temporary consultation.
+
+    No doctor authentication is required.
+
+    The session UUID identifies the temporary session.
+    """
+
+    session = get_session(session_id)
+
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found.",
+        )
+
+    if session["status"] in {
+        "completed",
+        "cancelled",
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Session is already closed.",
+        )
+
+    try:
+        updated_session = update_session_status(
+            session_id,
+            "cancelled",
+        )
+
+        if updated_session is None:
+            raise RuntimeError(
+                "Unable to cancel consultation session."
+            )
+
+        deleted = delete_session(
+            session_id,
+        )
+
+    except APIError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to cancel consultation session.",
+        ) from exc
+
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session could not be deleted.",
+        )
+
+    return {
+        "session_id": session_id,
+        "status": "cancelled",
+        "data_deleted": True,
+    }
+
+
+# ============================================================
 # DOCTOR SESSION CREATION
 # ============================================================
 
@@ -244,6 +369,8 @@ async def create_consultation_session(
 ):
     """
     Doctor can manually create a consultation session.
+
+    Patient-facing flow should normally use /sessions/join.
     """
 
     doctor_id = get_doctor_id(user)
@@ -259,10 +386,17 @@ async def create_consultation_session(
             detail="Unable to create consultation session.",
         ) from exc
 
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
 
 # ============================================================
 # DOCTOR QUEUE
-# IMPORTANT: THESE MUST COME BEFORE /{session_id}
+# IMPORTANT:
+# THESE MUST COME BEFORE /{session_id}
 # ============================================================
 
 @router.get(
@@ -337,6 +471,10 @@ async def get_session_queue(
         "count": len(patients),
     }
 
+
+# ============================================================
+# DOCTOR QUEUE PATIENT
+# ============================================================
 
 @router.get(
     "/queue/{session_id}",
@@ -419,6 +557,10 @@ async def get_consultation_session(
         "intake": intake,
     }
 
+
+# ============================================================
+# DOCTOR STATUS
+# ============================================================
 
 @router.get(
     "/{session_id}/status",
@@ -507,7 +649,10 @@ async def complete_session(
     user=Depends(get_current_user),
 ):
     """
-    Complete consultation and delete temporary data.
+    Doctor completes consultation.
+
+    The session and dependent temporary patient data
+    are deleted.
     """
 
     session = require_session_owner(
@@ -576,7 +721,9 @@ async def cancel_session(
     user=Depends(get_current_user),
 ):
     """
-    Cancel consultation and delete temporary data.
+    Doctor cancels consultation.
+
+    Cancelled sessions are deleted immediately.
     """
 
     session = require_session_owner(
