@@ -1,14 +1,13 @@
 import { apiRequest } from './api.js'
 
-
 // ============================================================
 // DOCTOR QUEUE
 // ============================================================
 
 export async function getSessionQueue() {
-    return apiRequest(
-        '/sessions/queue'
-    )
+  return apiRequest(
+    '/sessions/queue'
+  )
 }
 
 
@@ -17,9 +16,9 @@ export async function getSessionQueue() {
 // ============================================================
 
 export async function getQueuePatient(sessionId) {
-    return apiRequest(
-        `/sessions/queue/${sessionId}`
-    )
+  return apiRequest(
+    `/sessions/queue/${sessionId}`
+  )
 }
 
 
@@ -28,9 +27,9 @@ export async function getQueuePatient(sessionId) {
 // ============================================================
 
 export async function getSession(sessionId) {
-    return apiRequest(
-        `/sessions/${sessionId}`
-    )
+  return apiRequest(
+    `/sessions/${sessionId}`
+  )
 }
 
 
@@ -39,9 +38,9 @@ export async function getSession(sessionId) {
 // ============================================================
 
 export async function getSessionStatus(sessionId) {
-    return apiRequest(
-        `/sessions/${sessionId}/status`
-    )
+  return apiRequest(
+    `/sessions/${sessionId}/status`
+  )
 }
 
 
@@ -50,12 +49,12 @@ export async function getSessionStatus(sessionId) {
 // ============================================================
 
 export async function startSession(sessionId) {
-    return apiRequest(
-        `/sessions/${sessionId}/start`,
-        {
-            method: 'POST',
-        }
-    )
+  return apiRequest(
+    `/sessions/${sessionId}/start`,
+    {
+      method: 'POST',
+    }
+  )
 }
 
 
@@ -64,18 +63,18 @@ export async function startSession(sessionId) {
 // ============================================================
 
 export async function updateSessionStatus(
-    sessionId,
-    status
+  sessionId,
+  status
 ) {
-    return apiRequest(
-        `/sessions/${sessionId}/status`,
-        {
-            method: 'PATCH',
-            body: JSON.stringify({
-                status,
-            }),
-        }
-    )
+  return apiRequest(
+    `/sessions/${sessionId}/status`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        status,
+      }),
+    }
+  )
 }
 
 
@@ -84,12 +83,12 @@ export async function updateSessionStatus(
 // ============================================================
 
 export async function completeSession(sessionId) {
-    return apiRequest(
-        `/sessions/${sessionId}/complete`,
-        {
-            method: 'POST',
-        }
-    )
+  return apiRequest(
+    `/sessions/${sessionId}/complete`,
+    {
+      method: 'POST',
+    }
+  )
 }
 
 
@@ -98,10 +97,10 @@ export async function completeSession(sessionId) {
 // ============================================================
 
 export async function cancelSession(sessionId) {
-    return apiRequest(
-        `/sessions/${sessionId}/cancel`,
-        {
-            method: 'POST',
-        }
-    )
+  return apiRequest(
+    `/sessions/${sessionId}/cancel`,
+    {
+      method: 'POST',
+    }
+  )
 }

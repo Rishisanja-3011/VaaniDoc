@@ -5,12 +5,11 @@ import { apiFetch } from './api.js'
 // MOCK MODE
 // ============================================================
 //
-// We only use mock mode if explicitly enabled.
+// Mock mode is enabled only when explicitly requested:
 //
-// Do NOT automatically use mock mode just because
-// VITE_API_URL is missing.
+// VITE_USE_MOCK=true
 //
-// This prevents accidental fake sessions.
+// Otherwise the real VaaniDoc backend is always used.
 //
 
 const USE_MOCK =
@@ -31,60 +30,39 @@ const USE_MOCK =
  * {
  *   doctor_code
  * }
- *
- * Response:
- * {
- *   session_id,
- *   doctor_code,
- *   status
- * }
  */
 
 export async function createSession(
   doctorCode
 ) {
-
   if (!doctorCode) {
     throw new Error(
       'Doctor code is required.'
     )
   }
 
-
   const cleanDoctorCode =
     doctorCode.trim().toUpperCase()
 
-
-  // ----------------------------------------------------------
-  // MOCK
-  // ----------------------------------------------------------
-
   if (USE_MOCK) {
-
     await delay(500)
 
-    const sessionId =
-      `mock-sess-${Date.now()}`
-
     return {
-      session_id: sessionId,
-      doctor_code: cleanDoctorCode,
+      session_id:
+        `mock-sess-${Date.now()}`,
+      doctor_code:
+        cleanDoctorCode,
       status: 'waiting',
     }
   }
-
-
-  // ----------------------------------------------------------
-  // REAL BACKEND
-  // ----------------------------------------------------------
 
   return apiFetch(
     '/sessions/join',
     {
       method: 'POST',
-
       body: JSON.stringify({
-        doctor_code: cleanDoctorCode,
+        doctor_code:
+          cleanDoctorCode,
       }),
     }
   )
@@ -92,7 +70,7 @@ export async function createSession(
 
 
 // ============================================================
-// PATIENT INPUT
+// PATIENT TEXT INPUT
 // ============================================================
 
 /**
@@ -107,13 +85,11 @@ export async function submitTextInput(
   text,
   language
 ) {
-
   if (!sessionId) {
     throw new Error(
       'Session ID is missing.'
     )
   }
-
 
   if (!text || !text.trim()) {
     throw new Error(
@@ -121,26 +97,25 @@ export async function submitTextInput(
     )
   }
 
-
   if (USE_MOCK) {
-
     await delay(500)
 
     return {
-      session_id: sessionId,
+      session_id:
+        sessionId,
       status: 'received',
     }
   }
-
 
   return apiFetch(
     `/sessions/${sessionId}/input`,
     {
       method: 'POST',
-
       body: JSON.stringify({
-        text: text.trim(),
-        language: language || 'en',
+        text:
+          text.trim(),
+        language:
+          language || 'en',
       }),
     }
   )
@@ -148,13 +123,17 @@ export async function submitTextInput(
 
 
 // ============================================================
-// AUDIO INPUT
+// PATIENT AUDIO INPUT
 // ============================================================
 
 /**
- * Upload patient voice recording.
+ * Submit patient voice recording.
  *
- * Backend:
+ * IMPORTANT:
+ * This endpoint must exist in the backend before
+ * the patient app can use it.
+ *
+ * Backend expected:
  * POST /sessions/{session_id}/audio
  */
 
@@ -163,13 +142,11 @@ export async function submitAudioInput(
   audioBlob,
   language
 ) {
-
   if (!sessionId) {
     throw new Error(
       'Session ID is missing.'
     )
   }
-
 
   if (!audioBlob) {
     throw new Error(
@@ -177,20 +154,18 @@ export async function submitAudioInput(
     )
   }
 
-
   if (USE_MOCK) {
-
     await delay(500)
 
     return {
-      session_id: sessionId,
+      session_id:
+        sessionId,
       status: 'received',
     }
   }
 
-
-  const form = new FormData()
-
+  const form =
+    new FormData()
 
   form.append(
     'audio',
@@ -198,12 +173,10 @@ export async function submitAudioInput(
     'recording.webm'
   )
 
-
   form.append(
     'language',
     language || 'en'
   )
-
 
   return apiFetch(
     `/sessions/${sessionId}/audio`,
@@ -229,16 +202,13 @@ export async function submitAudioInput(
 export async function processSession(
   sessionId
 ) {
-
   if (!sessionId) {
     throw new Error(
       'Session ID is missing.'
     )
   }
 
-
   if (USE_MOCK) {
-
     await delay(1000)
 
     return {
@@ -270,7 +240,8 @@ export async function processSession(
         'Neurological',
       ],
 
-      urgency: 'moderate',
+      urgency:
+        'moderate',
 
       confidence: {
         symptoms: 1,
@@ -279,7 +250,6 @@ export async function processSession(
       },
     }
   }
-
 
   return apiFetch(
     `/processing/session/${sessionId}`,
@@ -295,36 +265,26 @@ export async function processSession(
 // ============================================================
 
 /**
- * IMPORTANT:
- *
- * This is the patient-facing endpoint.
+ * Get patient-facing session status.
  *
  * Backend:
  * GET /sessions/{session_id}/patient-status
  *
- * DO NOT use:
- * GET /sessions/{session_id}/status
- *
- * because /status is doctor-only.
+ * IMPORTANT:
+ * Do NOT use /status here.
+ * /status is doctor-only.
  */
 
 export async function getPatientSessionStatus(
   sessionId
 ) {
-
   if (!sessionId) {
     throw new Error(
       'Session ID is missing.'
     )
   }
 
-
-  // ----------------------------------------------------------
-  // MOCK
-  // ----------------------------------------------------------
-
   if (USE_MOCK) {
-
     await delay(300)
 
     const created =
@@ -339,29 +299,27 @@ export async function getPatientSessionStatus(
     const age =
       Date.now() - created
 
-
-    let status = 'waiting'
-
+    let sessionStatus =
+      'waiting'
 
     if (age >= 10000) {
-      status = 'completed'
+      sessionStatus =
+        'completed'
     } else if (age >= 6000) {
-      status = 'active'
+      sessionStatus =
+        'active'
     } else if (age >= 3000) {
-      status = 'processing'
+      sessionStatus =
+        'processing'
     }
-
 
     return {
-      session_id: sessionId,
-      status,
+      session_id:
+        sessionId,
+      status:
+        sessionStatus,
     }
   }
-
-
-  // ----------------------------------------------------------
-  // REAL BACKEND
-  // ----------------------------------------------------------
 
   return apiFetch(
     `/sessions/${sessionId}/patient-status`
@@ -370,15 +328,8 @@ export async function getPatientSessionStatus(
 
 
 // ============================================================
-// ALIAS
+// STATUS ALIAS
 // ============================================================
-//
-// If any existing component imports:
-//
-// getSessionStatus()
-//
-// it will still work.
-//
 
 export async function getSessionStatus(
   sessionId
@@ -394,38 +345,33 @@ export async function getSessionStatus(
 // ============================================================
 
 /**
- * Get complete session.
+ * Get consultation session.
  *
- * IMPORTANT:
- * This endpoint may be protected depending
- * on backend implementation.
- *
- * Patient pages should normally use
- * patient-status instead.
+ * Patient pages should normally prefer
+ * getPatientSessionStatus().
  */
 
 export async function getSession(
   sessionId
 ) {
-
   if (!sessionId) {
     throw new Error(
       'Session ID is missing.'
     )
   }
 
-
   if (USE_MOCK) {
-
     await delay(300)
 
     return {
-      session_id: sessionId,
-      status: 'active',
-      intake: null,
+      session_id:
+        sessionId,
+      status:
+        'active',
+      intake:
+        null,
     }
   }
-
 
   return apiFetch(
     `/sessions/${sessionId}`
@@ -434,40 +380,42 @@ export async function getSession(
 
 
 // ============================================================
-// CANCEL SESSION
+// PATIENT CANCEL
 // ============================================================
 
 /**
- * Cancel patient consultation.
+ * Cancel the patient consultation.
  *
  * Backend:
- * POST /sessions/{session_id}/cancel
+ * POST /sessions/{session_id}/patient-cancel
+ *
+ * IMPORTANT:
+ * This is intentionally different from
+ * the doctor cancellation endpoint.
  */
 
 export async function cancelSession(
   sessionId
 ) {
-
   if (!sessionId) {
     throw new Error(
       'Session ID is missing.'
     )
   }
 
-
   if (USE_MOCK) {
-
     await delay(300)
 
     return {
-      session_id: sessionId,
-      status: 'cancelled',
+      session_id:
+        sessionId,
+      status:
+        'cancelled',
     }
   }
 
-
   return apiFetch(
-    `/sessions/${sessionId}/cancel`,
+    `/sessions/${sessionId}/patient-cancel`,
     {
       method: 'POST',
     }
@@ -486,7 +434,6 @@ const STORAGE_KEY =
 export function savePatientSession(
   session
 ) {
-
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify(session)
@@ -495,17 +442,14 @@ export function savePatientSession(
 
 
 export function getSavedPatientSession() {
-
   const raw =
     localStorage.getItem(
       STORAGE_KEY
     )
 
-
   if (!raw) {
     return null
   }
-
 
   try {
     return JSON.parse(raw)
@@ -520,7 +464,6 @@ export function getSavedPatientSession() {
 
 
 export function clearPatientSession() {
-
   localStorage.removeItem(
     STORAGE_KEY
   )
@@ -532,7 +475,6 @@ export function clearPatientSession() {
 // ============================================================
 
 function delay(ms) {
-
   return new Promise(
     resolve => {
       setTimeout(

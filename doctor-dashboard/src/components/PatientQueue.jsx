@@ -6,57 +6,45 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
-const API_BASE_URL = 'http://127.0.0.1:8000'
+import {
+  getSessionQueue,
+} from '../services/sessionService.js'
+
 
 function PatientQueue({ onNavigate }) {
   const [patients, setPatients] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+
+  // ============================================================
+  // LOAD DOCTOR QUEUE
+  // ============================================================
+
   const loadQueue = async () => {
     try {
       setLoading(true)
       setError('')
 
-      const token = localStorage.getItem(
-        'vaanidoc_access_token',
-      )
+      const data = await getSessionQueue()
 
-      if (!token) {
-        throw new Error(
-          'Doctor authentication token not found.',
-        )
+      /*
+       * Backend currently returns:
+       *
+       * {
+       *   patients: [...]
+       * }
+       *
+       * Keep this defensive in case the backend returns
+       * the array directly.
+       */
+
+      if (Array.isArray(data)) {
+        setPatients(data)
+      } else {
+        setPatients(data?.patients || [])
       }
 
-      const response = await fetch(
-        `${API_BASE_URL}/sessions/queue`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      )
-
-      if (!response.ok) {
-        let message = `Unable to load patient queue (${response.status}).`
-
-        try {
-          const data = await response.json()
-
-          if (data?.detail) {
-            message = data.detail
-          }
-        } catch {
-          // Keep default error message.
-        }
-
-        throw new Error(message)
-      }
-
-      const data = await response.json()
-
-      setPatients(data.patients || [])
     } catch (err) {
       console.error(
         'Queue loading error:',
@@ -64,19 +52,34 @@ function PatientQueue({ onNavigate }) {
       )
 
       setError(
-        err.message ||
+        err?.message ||
         'Unable to load patient queue.',
       )
+
     } finally {
       setLoading(false)
     }
   }
 
+
+  // ============================================================
+  // INITIAL LOAD
+  // ============================================================
+
   useEffect(() => {
     loadQueue()
   }, [])
 
+
+  // ============================================================
+  // OPEN PATIENT
+  // ============================================================
+
   const handleViewPatient = (sessionId) => {
+    if (!sessionId) {
+      return
+    }
+
     onNavigate(
       'current-patient',
       {
@@ -84,6 +87,11 @@ function PatientQueue({ onNavigate }) {
       },
     )
   }
+
+
+  // ============================================================
+  // LANGUAGE
+  // ============================================================
 
   const formatLanguage = (language) => {
     const languages = {
@@ -100,6 +108,11 @@ function PatientQueue({ onNavigate }) {
     )
   }
 
+
+  // ============================================================
+  // URGENCY
+  // ============================================================
+
   const formatUrgency = (urgency) => {
     if (!urgency) {
       return 'Not assessed'
@@ -111,6 +124,11 @@ function PatientQueue({ onNavigate }) {
     )
   }
 
+
+  // ============================================================
+  // RENDER
+  // ============================================================
+
   return (
     <div className="page-content">
 
@@ -119,7 +137,9 @@ function PatientQueue({ onNavigate }) {
       {/* ================================================== */}
 
       <section className="queue-page-header">
+
         <div>
+
           <span className="eyebrow">
             PATIENT QUEUE
           </span>
@@ -132,9 +152,12 @@ function PatientQueue({ onNavigate }) {
             Review the prepared patient intake and
             select the next patient when you are ready.
           </p>
+
         </div>
 
+
         {patients.length > 0 && (
+
           <button
             type="button"
             className="primary-button"
@@ -145,10 +168,14 @@ function PatientQueue({ onNavigate }) {
             }
           >
             Next Patient
+
             <ArrowRight size={17} />
           </button>
+
         )}
+
       </section>
+
 
       {/* ================================================== */}
       {/* QUEUE */}
@@ -157,7 +184,9 @@ function PatientQueue({ onNavigate }) {
       <section className="queue-list-section">
 
         <div className="section-heading">
+
           <div>
+
             <span className="eyebrow">
               READY
             </span>
@@ -165,29 +194,47 @@ function PatientQueue({ onNavigate }) {
             <h3>
               Consultation queue
             </h3>
+
           </div>
 
+
           <span className="queue-count">
+
             {patients.length}{' '}
+
             {patients.length === 1
               ? 'patient'
               : 'patients'}
+
           </span>
+
         </div>
 
+
+        {/* ================================================== */}
         {/* LOADING */}
+        {/* ================================================== */}
 
         {loading && (
+
           <div className="empty-state">
             Loading patient queue...
           </div>
+
         )}
 
+
+        {/* ================================================== */}
         {/* ERROR */}
+        {/* ================================================== */}
 
         {!loading && error && (
+
           <div className="empty-state">
-            <p>{error}</p>
+
+            <p>
+              {error}
+            </p>
 
             <button
               type="button"
@@ -196,35 +243,51 @@ function PatientQueue({ onNavigate }) {
             >
               Try Again
             </button>
+
           </div>
+
         )}
 
+
+        {/* ================================================== */}
         {/* EMPTY */}
+        {/* ================================================== */}
 
         {!loading &&
           !error &&
           patients.length === 0 && (
+
             <div className="empty-state">
+
               No patients are currently ready
               for consultation.
+
             </div>
+
           )}
 
-        {/* PATIENTS */}
+
+        {/* ================================================== */}
+        {/* PATIENT LIST */}
+        {/* ================================================== */}
 
         {!loading &&
           !error &&
           patients.length > 0 && (
+
             <div className="patient-queue-list">
 
               {patients.map(
                 (patient, index) => {
+
                   const urgency =
                     formatUrgency(
                       patient.urgency,
                     )
 
+
                   return (
+
                     <article
                       key={
                         patient.session_id
@@ -238,13 +301,17 @@ function PatientQueue({ onNavigate }) {
                         #{index + 1}
                       </div>
 
+
                       {/* AVATAR */}
 
                       <div className="patient-avatar">
+
                         <UserRound
                           size={21}
                         />
+
                       </div>
+
 
                       {/* MAIN INFO */}
 
@@ -262,24 +329,31 @@ function PatientQueue({ onNavigate }) {
                             )}
                           </strong>
 
+
                           <span
-                            className={`status-badge ${patient.urgency ||
+                            className={
+                              `status-badge ${patient.urgency ||
                               'unknown'
-                              }`}
+                              }`
+                            }
                           >
                             {urgency}
                           </span>
 
                         </div>
 
+
                         <p>
                           {patient.complaint ||
+                            patient.chief_complaint ||
                             'Complaint not available'}
                         </p>
+
 
                         <div className="patient-queue-meta">
 
                           <span>
+
                             <Languages
                               size={14}
                             />
@@ -287,19 +361,24 @@ function PatientQueue({ onNavigate }) {
                             {formatLanguage(
                               patient.language,
                             )}
+
                           </span>
 
+
                           <span>
+
                             <Clock3
                               size={14}
                             />
 
                             Ready for consultation
+
                           </span>
 
                         </div>
 
                       </div>
+
 
                       {/* ACTION */}
 
@@ -312,22 +391,27 @@ function PatientQueue({ onNavigate }) {
                           )
                         }
                       >
+
                         View Patient
 
                         <ArrowRight
                           size={16}
                         />
+
                       </button>
 
                     </article>
+
                   )
                 },
               )}
 
             </div>
+
           )}
 
       </section>
+
 
       {/* ================================================== */}
       {/* PRIVACY */}
@@ -336,14 +420,20 @@ function PatientQueue({ onNavigate }) {
       <section className="privacy-notice">
 
         <div className="privacy-notice-icon">
-          <Clock3 size={19} />
+
+          <Clock3
+            size={19}
+          />
+
         </div>
+
 
         <div>
 
           <strong>
             Active session privacy
           </strong>
+
 
           <p>
             Patient information shown in this
@@ -359,5 +449,6 @@ function PatientQueue({ onNavigate }) {
     </div>
   )
 }
+
 
 export default PatientQueue
