@@ -1,5 +1,5 @@
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, File, UploadFile
 from pydantic import BaseModel, Field
 from postgrest.exceptions import APIError
 
@@ -33,6 +33,15 @@ router = APIRouter(
     prefix="/sessions",
     tags=["Sessions"],
 )
+
+
+SUPPORTED_AUDIO_MIME_TYPES = {
+    "audio/webm",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/wav",
+    "audio/ogg",
+}
 
 
 # ============================================================
@@ -258,6 +267,97 @@ async def submit_patient_input(
     return {
         "session_id": session_id,
         "status": "received",
+    }
+
+
+@router.post(
+    "/{session_id}/audio",
+)
+async def submit_patient_audio(
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    audio: UploadFile = File(...),
+):
+    session = get_session(session_id)
+
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found.",
+        )
+
+    if session["status"] != "waiting":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Symptoms have already been submitted for this session.",
+        )
+
+    mime_type = (audio.content_type or "").lower().split(";")[0].strip()
+
+    if mime_type not in SUPPORTED_AUDIO_MIME_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported audio format.",
+        )
+
+    audio_bytes = await audio.read()
+
+    if not audio_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Audio recording is empty.",
+        )
+
+    try:
+        from app.services.ai_service import (
+            AIProcessingError,
+            transcribe_patient_audio,
+        )
+
+        transcript_data = transcribe_patient_audio(
+            audio_bytes=audio_bytes,
+            mime_type=mime_type,
+        )
+
+        saved_input = save_patient_input(
+            session_id,
+            {
+                "type": "audio",
+                "text": transcript_data["transcript"],
+                "language": transcript_data["language"],
+                "audio_reference": audio.filename or "patient-audio",
+            },
+        )
+
+        if saved_input is None:
+            raise RuntimeError(
+                "Failed to save patient audio input."
+            )
+
+    except AIProcessingError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+    except APIError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to save patient audio input.",
+        ) from exc
+
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    background_tasks.add_task(_auto_process_session, session_id)
+
+    return {
+        "session_id": session_id,
+        "status": "received",
+        "language": transcript_data["language"],
     }
 
 

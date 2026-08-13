@@ -139,8 +139,7 @@ export async function submitTextInput(
 
 export async function submitAudioInput(
   sessionId,
-  audioBlob,
-  language
+  audioBlob
 ) {
   if (!sessionId) {
     throw new Error(
@@ -171,11 +170,6 @@ export async function submitAudioInput(
     'audio',
     audioBlob,
     'recording.webm'
-  )
-
-  form.append(
-    'language',
-    language || 'en'
   )
 
   return apiFetch(
@@ -434,9 +428,14 @@ const STORAGE_KEY =
 export function savePatientSession(
   session
 ) {
+  const nextSession = {
+    ...getSavedPatientSession(),
+    ...session,
+  }
+
   localStorage.setItem(
     STORAGE_KEY,
-    JSON.stringify(session)
+    JSON.stringify(nextSession)
   )
 }
 

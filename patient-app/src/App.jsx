@@ -1,10 +1,11 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import {
   Routes,
   Route,
   Navigate,
   useParams,
   useLocation,
+  useNavigate,
 } from 'react-router-dom'
 
 import JoinDoctor from './pages/JoinDoctor.jsx'
@@ -12,6 +13,11 @@ import DoctorConfirm from './pages/DoctorConfirm.jsx'
 import SymptomInput from './pages/SymptomInput.jsx'
 import InputReview from './pages/InputReview.jsx'
 import WaitingRoom from './pages/WaitingRoom.jsx'
+import {
+  clearPatientSession,
+  getPatientSessionStatus,
+  getSavedPatientSession,
+} from './services/sessionService.js'
 
 const QRScanner = lazy(
   () => import('./pages/QRScanner.jsx')
@@ -74,6 +80,44 @@ const KEYFRAMES = `
 // ============================================================
 
 export default function App() {
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    const savedSession = getSavedPatientSession()
+
+    if (!savedSession?.sessionId || !savedSession?.currentPath) {
+      return
+    }
+
+    if (window.location.pathname !== '/') {
+      return
+    }
+
+    getPatientSessionStatus(savedSession.sessionId)
+      .then((data) => {
+        if (['completed', 'cancelled'].includes(data?.status)) {
+          clearPatientSession()
+          return
+        }
+
+        navigate(savedSession.currentPath, {
+          replace: true,
+          state: {
+            sessionId: savedSession.sessionId,
+            doctorCode: savedSession.doctorCode,
+            doctorName: savedSession.doctorName,
+            doctorId: savedSession.doctorId,
+            ...(savedSession.reviewData || {}),
+          },
+        })
+      })
+      .catch((error) => {
+        if (error?.status === 404) {
+          clearPatientSession()
+        }
+      })
+  }, [navigate])
+
   return (
     <>
       <style>

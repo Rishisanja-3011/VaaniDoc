@@ -10,7 +10,11 @@ import {
 } from 'lucide-react'
 
 import { lookupDoctor } from '../services/doctorService.js'
-import { createSession } from '../services/sessionService.js'
+import {
+  clearPatientSession,
+  createSession,
+  savePatientSession,
+} from '../services/sessionService.js'
 import { ERR, friendlyApiError } from '../services/errors.js'
 import ConnectionBanner from '../components/ConnectionBanner.jsx'
 
@@ -32,11 +36,23 @@ export default function DoctorConfirm() {
       return
     }
 
+    clearPatientSession()
+
     lookupDoctor(doctorCode)
       .then((d) => {
+        const doctorName =
+          d?.doctor_name ??
+          d?.name ??
+          ''
+
         setDoctor(d)
         setState('found')
         setErrorMsg('')
+        savePatientSession({
+          currentPath: `/confirm/${doctorCode}`,
+          doctorCode,
+          doctorName,
+        })
       })
       .catch((err) => {
         setErrorMsg(
@@ -77,12 +93,21 @@ export default function DoctorConfirm() {
        * }
        */
       const session = await createSession(doctorCode)
+      const doctorName = displayName
+
+      savePatientSession({
+        currentPath: `/symptoms/${doctorCode}`,
+        sessionId: session.session_id,
+        doctorCode,
+        doctorId: doctor.doctor_id,
+        doctorName,
+      })
 
       navigate(`/symptoms/${doctorCode}`, {
         state: {
           sessionId: session.session_id,
           doctorId: doctor.doctor_id,
-          doctorName: displayName,
+          doctorName,
         },
       })
     } catch (err) {

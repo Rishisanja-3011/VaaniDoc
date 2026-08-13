@@ -8,6 +8,13 @@ import {
 } from 'lucide-react'
 
 function Sidebar({ activePage, onNavigate }) {
+  const logout = () => {
+    localStorage.removeItem('vaanidoc_access_token')
+    localStorage.removeItem('vaanidoc_refresh_token')
+    localStorage.removeItem('vaanidoc_dashboard_state')
+    onNavigate('login')
+  }
+
   const menuItems = [
     {
       id: 'dashboard',
@@ -77,7 +84,7 @@ function Sidebar({ activePage, onNavigate }) {
         <button
           type="button"
           className="sidebar-logout"
-          onClick={() => onNavigate('login')}
+          onClick={logout}
         >
           <LogOut size={18} />
           <span>Log out</span>

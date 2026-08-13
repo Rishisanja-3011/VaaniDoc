@@ -1,25 +1,24 @@
-import { useRef, useState } from 'react'
-import { useNavigate, useParams, useLocation } from 'react-router-dom'
-import { Mic, MicOff, Square, ArrowRight, RotateCcw } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { ArrowRight, Mic, MicOff, RotateCcw, Square } from 'lucide-react'
 import PageShell from '../components/PageShell.jsx'
+import {
+  getSavedPatientSession,
+  savePatientSession,
+} from '../services/sessionService.js'
 
 const LANGUAGES = [
-  { code: 'gu', label: 'ગુજરાતી', english: 'Gujarati' },
-  { code: 'hi', label: 'हिन्दी',   english: 'Hindi' },
-  { code: 'mr', label: 'मराठी',    english: 'Marathi' },
-  { code: 'ta', label: 'தமிழ்',    english: 'Tamil' },
-  { code: 'te', label: 'తెలుగు',   english: 'Telugu' },
-  { code: 'kn', label: 'ಕನ್ನಡ',    english: 'Kannada' },
-  { code: 'ml', label: 'മലയാളം',   english: 'Malayalam' },
-  { code: 'bn', label: 'বাংলা',    english: 'Bengali' },
-  { code: 'pa', label: 'ਪੰਜਾਬੀ',   english: 'Punjabi' },
-  { code: 'en', label: 'English',  english: 'English' },
+  { code: 'gu', label: '\u0a97\u0ac1\u0a9c\u0ab0\u0abe\u0aa4\u0ac0', english: 'Gujarati' },
+  { code: 'hi', label: '\u0939\u093f\u0928\u094d\u0926\u0940', english: 'Hindi' },
+  { code: 'mr', label: '\u092e\u0930\u093e\u0920\u0940', english: 'Marathi' },
+  { code: 'ta', label: '\u0ba4\u0bae\u0bbf\u0bb4\u0bcd', english: 'Tamil' },
+  { code: 'te', label: '\u0c24\u0c46\u0c32\u0c41\u0c17\u0c41', english: 'Telugu' },
+  { code: 'kn', label: '\u0c95\u0ca8\u0ccd\u0ca8\u0ca1', english: 'Kannada' },
+  { code: 'ml', label: '\u0d2e\u0d32\u0d2f\u0d3e\u0d33\u0d02', english: 'Malayalam' },
+  { code: 'bn', label: '\u09ac\u09be\u0982\u09b2\u09be', english: 'Bengali' },
+  { code: 'pa', label: '\u0a2a\u0a70\u0a1c\u0a3e\u0a2c\u0a40', english: 'Punjabi' },
+  { code: 'en', label: 'English', english: 'English' },
 ]
-
-const SPEECH_LOCALES = {
-  gu: 'gu-IN', hi: 'hi-IN', mr: 'mr-IN', ta: 'ta-IN', te: 'te-IN',
-  kn: 'kn-IN', ml: 'ml-IN', bn: 'bn-IN', pa: 'pa-IN', en: 'en-IN',
-}
 
 function formatDuration(secs) {
   const m = String(Math.floor(secs / 60)).padStart(2, '0')
@@ -31,19 +30,24 @@ export default function SymptomInput() {
   const { doctorCode } = useParams()
   const navigate = useNavigate()
   const { state: routeState } = useLocation()
-  const sessionId = routeState?.sessionId
-  const doctorName = routeState?.doctorName ?? ''
+  const savedSession = getSavedPatientSession()
+  const restoredSession =
+    savedSession?.doctorCode === doctorCode
+      ? savedSession
+      : null
+  const sessionId =
+    routeState?.sessionId ||
+    restoredSession?.sessionId
+  const doctorName =
+    routeState?.doctorName ??
+    restoredSession?.doctorName ??
+    ''
 
-  // All hooks must be called before any conditional return (Rules of Hooks).
-  const [tab, setTab] = useState('text')           // 'text' | 'voice'
+  const [tab, setTab] = useState('text')
   const [language, setLanguage] = useState('hi')
-
-  // --- text state ---
   const [text, setText] = useState('')
   const [textError, setTextError] = useState('')
-
-  // --- voice state ---
-  const [recState, setRecState] = useState('idle') // idle | recording | done | error
+  const [recState, setRecState] = useState('idle')
   const [recError, setRecError] = useState('')
   const [duration, setDuration] = useState(0)
   const [audioBlob, setAudioBlob] = useState(null)
@@ -54,53 +58,101 @@ export default function SymptomInput() {
   const chunksRef = useRef([])
   const timerRef = useRef(null)
 
+  useEffect(() => {
+    if (!sessionId) {
+      navigate(`/confirm/${doctorCode}`, { replace: true })
+      return
+    }
+
+    savePatientSession({
+      currentPath: `/symptoms/${doctorCode}`,
+      sessionId,
+      doctorCode,
+      doctorName,
+    })
+  }, [doctorCode, doctorName, navigate, sessionId])
+
   if (!sessionId) {
-    navigate(`/confirm/${doctorCode}`)
     return null
   }
 
-  // ── Text handlers ──────────────────────────────────────────────
   function handleTextContinue() {
-    if (!text.trim()) { setTextError('Please describe your symptoms before continuing.'); return }
+    const trimmed = text.trim()
+
+    if (!trimmed) {
+      setTextError('Please describe your symptoms before continuing.')
+      return
+    }
+
+    const reviewState = {
+      type: 'text',
+      text: trimmed,
+      language,
+      sessionId,
+      doctorName,
+    }
+
+    savePatientSession({
+      currentPath: `/review/${doctorCode}`,
+      sessionId,
+      doctorCode,
+      doctorName,
+      reviewData: reviewState,
+    })
+
     navigate(`/review/${doctorCode}`, {
-      state: { type: 'text', text: text.trim(), language, sessionId, doctorName },
+      state: reviewState,
     })
   }
 
-  // ── Voice handlers ─────────────────────────────────────────────
   async function startRecording() {
     setRecError('')
     setDuration(0)
     setTranscript('')
     chunksRef.current = []
+
     try {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+      const SpeechRecognition =
+        window.SpeechRecognition ||
+        window.webkitSpeechRecognition
+
       if (!SpeechRecognition) {
         throw new Error('SpeechRecognitionUnavailable')
       }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mr = new MediaRecorder(stream)
-      mediaRecorderRef.current = mr
-      mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data) }
-      mr.onstop = () => {
-        stream.getTracks().forEach(t => t.stop())
-        const blob = new Blob(chunksRef.current, { type: mr.mimeType || 'audio/webm' })
+      const mediaRecorder = new MediaRecorder(stream)
+      mediaRecorderRef.current = mediaRecorder
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunksRef.current.push(event.data)
+        }
+      }
+
+      mediaRecorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop())
+        const blob = new Blob(chunksRef.current, {
+          type: mediaRecorder.mimeType || 'audio/webm',
+        })
         setAudioBlob(blob)
         setRecState('done')
       }
-      mr.start(250) // collect chunks every 250ms
+
+      mediaRecorder.start(250)
+
       const recognition = new SpeechRecognition()
-      recognition.lang = SPEECH_LOCALES[language] || 'en-IN'
+      recognition.lang = 'en-IN'
       recognition.continuous = true
       recognition.interimResults = true
-      recognition.onresult = event => {
+      recognition.onresult = (event) => {
         let nextTranscript = ''
         for (let index = 0; index < event.results.length; index += 1) {
           nextTranscript += event.results[index][0].transcript
         }
         setTranscript(nextTranscript.trim())
       }
-      recognition.onerror = event => {
+      recognition.onerror = (event) => {
         if (event.error !== 'aborted' && event.error !== 'no-speech') {
           setRecError('Voice transcription was interrupted. Please try again or type your symptoms.')
         }
@@ -108,9 +160,10 @@ export default function SymptomInput() {
       recognitionRef.current = recognition
       recognition.start()
       setRecState('recording')
-      timerRef.current = setInterval(() => setDuration(d => d + 1), 1000)
+      timerRef.current = setInterval(() => setDuration((value) => value + 1), 1000)
     } catch (err) {
       const msg = String(err)
+
       if (msg.includes('SpeechRecognitionUnavailable')) {
         setRecError('Voice-to-text is available in recent Chrome and Edge browsers. Please type your symptoms on this browser.')
       } else if (msg.includes('Permission') || msg.includes('NotAllowed')) {
@@ -120,6 +173,7 @@ export default function SymptomInput() {
       } else {
         setRecError('Could not start recording. Please try again.')
       }
+
       setRecState('error')
     }
   }
@@ -132,9 +186,10 @@ export default function SymptomInput() {
 
   function resetRecording() {
     clearInterval(timerRef.current)
-    // Only stop if the recorder is in a stoppable state (not errored/never started).
-    const mr = mediaRecorderRef.current
-    if (mr && mr.state !== 'inactive') mr.stop()
+    const mediaRecorder = mediaRecorderRef.current
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop()
+    }
     mediaRecorderRef.current = null
     recognitionRef.current?.abort()
     recognitionRef.current = null
@@ -146,77 +201,104 @@ export default function SymptomInput() {
   }
 
   function handleVoiceContinue() {
-    if (!transcript.trim()) {
-      setRecError('We could not transcribe that recording. Please record again or type your symptoms.')
+    const trimmed = transcript.trim()
+
+    if (!audioBlob) {
+      setRecError('We could not save that recording. Please record again or type your symptoms.')
       return
     }
+
+    const reviewState = {
+      type: 'voice',
+      text: trimmed,
+      audioBlob,
+      duration,
+      language,
+      sessionId,
+      doctorName,
+    }
+
+    savePatientSession({
+      currentPath: `/review/${doctorCode}`,
+      sessionId,
+      doctorCode,
+      doctorName,
+      reviewData: {
+        type: 'voice',
+        text: trimmed,
+        duration,
+        language,
+      },
+    })
+
     navigate(`/review/${doctorCode}`, {
-      state: { type: 'voice', text: transcript.trim(), audioBlob, duration, language, sessionId, doctorName },
+      state: reviewState,
     })
   }
 
-  const selectedLang = LANGUAGES.find(l => l.code === language)
+  const selectedLang =
+    LANGUAGES.find((item) => item.code === language) ||
+    LANGUAGES[0]
 
   return (
     <PageShell backTo={`/confirm/${doctorCode}`}>
       <h2 style={s.heading}>Describe your symptoms</h2>
 
-      {/* Language selector */}
-      <div style={s.langRow}>
-        <span style={s.langLabel}>Language:</span>
-        <select
-          style={s.langSelect}
-          value={language}
-          onChange={e => setLanguage(e.target.value)}
-        >
-          {LANGUAGES.map(l => (
-            <option key={l.code} value={l.code}>{l.english} — {l.label}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Tabs */}
       <div style={s.tabs}>
-        <button style={{ ...s.tab, ...(tab === 'text' ? s.tabActive : {}) }} onClick={() => setTab('text')}>
+        <button
+          style={{ ...s.tab, ...(tab === 'text' ? s.tabActive : {}) }}
+          onClick={() => setTab('text')}
+        >
           Type
         </button>
-        <button style={{ ...s.tab, ...(tab === 'voice' ? s.tabActive : {}) }} onClick={() => setTab('voice')}>
+        <button
+          style={{ ...s.tab, ...(tab === 'voice' ? s.tabActive : {}) }}
+          onClick={() => setTab('voice')}
+        >
           Voice
         </button>
       </div>
 
-      {/* ── TEXT TAB ── */}
       {tab === 'text' && (
         <div style={s.tabPanel}>
+          <div style={s.langRow}>
+            <span style={s.langLabel}>Language:</span>
+            <select
+              style={s.langSelect}
+              value={language}
+              onChange={(event) => setLanguage(event.target.value)}
+            >
+              {LANGUAGES.map((item) => (
+                <option key={item.code} value={item.code}>
+                  {item.english} - {item.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <textarea
             style={{ ...s.textarea, ...(textError ? s.textareaError : {}) }}
-            placeholder={`Describe your symptoms in ${selectedLang.english} (${selectedLang.label})…\n\nFor example: "I have a headache and fever since yesterday."`}
+            placeholder={`Describe your symptoms in ${selectedLang.english} (${selectedLang.label})...\n\nFor example: "I have a headache and fever since yesterday."`}
             value={text}
-            onChange={e => { setText(e.target.value); setTextError('') }}
+            onChange={(event) => {
+              setText(event.target.value)
+              setTextError('')
+            }}
             rows={6}
             lang={language}
           />
           {textError && <p style={s.errorText}>{textError}</p>}
-          <button
-            style={s.primaryBtn}
-            onClick={handleTextContinue}
-            onMouseEnter={e => Object.assign(e.currentTarget.style, { background: '#1d4ed8', boxShadow: '0 4px 14px rgba(37,99,235,0.35)' })}
-            onMouseLeave={e => Object.assign(e.currentTarget.style, { background: '#2563eb', boxShadow: '0 2px 8px rgba(37,99,235,0.25)' })}
-            onMouseDown={e => Object.assign(e.currentTarget.style, { transform: 'translateY(1px)', boxShadow: '0 1px 4px rgba(37,99,235,0.2)' })}
-            onMouseUp={e => Object.assign(e.currentTarget.style, { transform: 'translateY(0)', boxShadow: '0 4px 14px rgba(37,99,235,0.35)' })}
-          >
+          <button style={s.primaryBtn} onClick={handleTextContinue}>
             Review &amp; Submit <ArrowRight size={16} />
           </button>
         </div>
       )}
 
-      {/* ── VOICE TAB ── */}
       {tab === 'voice' && (
         <div style={s.tabPanel}>
-          {/* Idle */}
           {recState === 'idle' && (
             <div style={s.voiceCenter}>
-              <p style={s.voiceHint}>Tap the microphone and speak your symptoms in {selectedLang.english}.</p>
+              <p style={s.voiceHint}>Tap the microphone and speak your symptoms. VaaniDoc will detect the language automatically.</p>
               <button style={s.micBtn} onClick={startRecording}>
                 <Mic size={32} color="#fff" />
               </button>
@@ -224,11 +306,17 @@ export default function SymptomInput() {
             </div>
           )}
 
-          {/* Recording */}
           {recState === 'recording' && (
             <div style={s.voiceCenter}>
-              <p style={{ ...s.voiceHint, color: '#ef4444' }}>Recording…</p>
-              <button style={{ ...s.micBtn, background: '#ef4444', animation: 'pulse 1s ease-in-out infinite' }} onClick={stopRecording}>
+              <p style={{ ...s.voiceHint, color: '#ef4444' }}>Recording...</p>
+              <button
+                style={{
+                  ...s.micBtn,
+                  background: '#ef4444',
+                  animation: 'pulse 1s ease-in-out infinite',
+                }}
+                onClick={stopRecording}
+              >
                 <Square size={28} color="#fff" />
               </button>
               <p style={s.timerText}>{formatDuration(duration)}</p>
@@ -236,17 +324,16 @@ export default function SymptomInput() {
             </div>
           )}
 
-          {/* Done */}
           {recState === 'done' && (
             <div style={s.voiceCenter}>
               <div style={s.doneBox}>
                 <Mic size={22} color="var(--accent)" />
                 <div>
                   <p style={s.doneTitle}>Recording ready</p>
-                  <p style={s.doneMeta}>{formatDuration(duration)} · {selectedLang.english}</p>
+                  <p style={s.doneMeta}>{formatDuration(duration)} - language will be detected automatically</p>
                 </div>
               </div>
-              {transcript && <p style={s.transcript}>“{transcript}”</p>}
+              {transcript && <p style={s.transcript}>"{transcript}"</p>}
               <div style={s.voiceActions}>
                 <button style={s.secondaryBtn} onClick={resetRecording}>
                   <RotateCcw size={15} /> Record Again
@@ -258,7 +345,6 @@ export default function SymptomInput() {
             </div>
           )}
 
-          {/* Error */}
           {recState === 'error' && (
             <div style={s.voiceCenter}>
               <MicOff size={36} color="#ef4444" />

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertCircle, CheckCircle2, Clock3, LoaderCircle, WifiOff } from 'lucide-react'
-import { getPatientSessionStatus, cancelSession, clearPatientSession } from '../services/sessionService.js'
+import { cancelSession, clearPatientSession, getPatientSessionStatus, getSavedPatientSession, savePatientSession } from '../services/sessionService.js'
 import PageShell from '../components/PageShell.jsx'
 
 const TERMINAL = new Set(['completed', 'cancelled'])
@@ -13,20 +13,40 @@ const STATUS = {
 }
 
 export default function WaitingRoom({ sessionId, doctorName, doctorCode }) {
+  const savedSession = getSavedPatientSession()
+  const resolvedSessionId = sessionId || savedSession?.sessionId
+  const resolvedDoctorName = doctorName || savedSession?.doctorName
+  const resolvedDoctorCode = doctorCode || savedSession?.doctorCode
   const [status, setStatus] = useState('waiting')
   const [networkNotice, setNetworkNotice] = useState('')
   const [ended, setEnded] = useState('')
   const attempts = useRef(0)
 
   useEffect(() => {
-    if (!sessionId) { setEnded('Your consultation session is unavailable. Please join your doctor again.'); return undefined }
+    if (!resolvedSessionId) {
+      setEnded('Your consultation session is unavailable. Please join your doctor again.')
+      return undefined
+    }
+
+    savePatientSession({
+      currentPath: `/waiting/${resolvedSessionId}`,
+      sessionId: resolvedSessionId,
+      doctorCode: resolvedDoctorCode,
+      doctorName: resolvedDoctorName,
+    })
+
     let disposed = false
     let timer
-    const schedule = (delay) => { timer = window.setTimeout(poll, delay) }
+    const schedule = (delay) => {
+      timer = window.setTimeout(poll, delay)
+    }
     const poll = async () => {
-      if (disposed || document.hidden) { schedule(8000); return }
+      if (disposed || document.hidden) {
+        schedule(8000)
+        return
+      }
       try {
-        const data = await getPatientSessionStatus(sessionId)
+        const data = await getPatientSessionStatus(resolvedSessionId)
         if (disposed) return
         attempts.current = 0
         setNetworkNotice('')
@@ -46,32 +66,54 @@ export default function WaitingRoom({ sessionId, doctorName, doctorCode }) {
           return
         }
         attempts.current += 1
-        setNetworkNotice('Connection temporarily unavailable. We’ll retry when the connection returns.')
+        setNetworkNotice('Connection temporarily unavailable. We will retry when the connection returns.')
         schedule(Math.min(30000, 3000 * 2 ** attempts.current))
       }
     }
-    const resume = () => { if (!document.hidden) { window.clearTimeout(timer); void poll() } }
+    const resume = () => {
+      if (!document.hidden) {
+        window.clearTimeout(timer)
+        void poll()
+      }
+    }
     document.addEventListener('visibilitychange', resume)
     void poll()
-    return () => { disposed = true; window.clearTimeout(timer); document.removeEventListener('visibilitychange', resume) }
-  }, [sessionId])
+    return () => {
+      disposed = true
+      window.clearTimeout(timer)
+      document.removeEventListener('visibilitychange', resume)
+    }
+  }, [resolvedDoctorCode, resolvedDoctorName, resolvedSessionId])
 
   const cancel = async () => {
-    try { await cancelSession(sessionId) } catch { /* cancellation is best effort; session data remains protected by expiry */ }
+    try {
+      await cancelSession(resolvedSessionId)
+    } catch {
+      /* cancellation is best effort; session data remains protected by expiry */
+    }
     clearPatientSession()
     setEnded('This consultation was cancelled. Your temporary information has been removed.')
   }
 
-  if (ended) return <PageShell><section style={s.card} role="status"><AlertCircle size={30} color="var(--amber)" /><h1 style={s.title}>Consultation ended</h1><p style={s.text}>{ended}</p><a href="/" style={s.primary}>Join a doctor</a></section></PageShell>
+  if (ended) {
+    return <PageShell><section style={s.card} role="status"><AlertCircle size={30} color="var(--amber)" /><h1 style={s.title}>Consultation ended</h1><p style={s.text}>{ended}</p><a href="/" style={s.primary}>Join a doctor</a></section></PageShell>
+  }
 
   const details = STATUS[status] || STATUS.waiting
   const Icon = details.icon
-  return <PageShell title="Consultation status"><section style={s.card} aria-live="polite"><div style={{ ...s.icon, ...(details.tone === 'ready' ? s.ready : {}) }}><Icon size={30} /></div><p style={s.eyebrow}>CONNECTED CONSULTATION</p><h1 style={s.title}>{details.title}</h1><p style={s.text}>{details.text}</p>{doctorName && <div style={s.doctor}><strong>You’re connected to Dr. {doctorName.replace(/^Dr\.\s*/i, '')}</strong>{doctorCode && <span>VAN code: {doctorCode}</span>}</div>}{networkNotice && <div style={s.network} role="status"><WifiOff size={16} />{networkNotice}</div>}<p style={s.note}>VaaniDoc provides AI-assisted intake support. It does not diagnose or prescribe treatment.</p><button type="button" style={s.cancel} onClick={cancel}>Cancel consultation</button></section></PageShell>
+  return <PageShell title="Consultation status"><section style={s.card} aria-live="polite"><div style={{ ...s.icon, ...(details.tone === 'ready' ? s.ready : {}) }}><Icon size={30} /></div><p style={s.eyebrow}>CONNECTED CONSULTATION</p><h1 style={s.title}>{details.title}</h1><p style={s.text}>{details.text}</p>{resolvedDoctorName && <div style={s.doctor}><strong>You are connected to Dr. {resolvedDoctorName.replace(/^Dr\.\s*/i, '')}</strong>{resolvedDoctorCode && <span>VAN code: {resolvedDoctorCode}</span>}</div>}{networkNotice && <div style={s.network} role="status"><WifiOff size={16} />{networkNotice}</div>}<p style={s.note}>VaaniDoc provides AI-assisted intake support. It does not diagnose or prescribe treatment.</p><button type="button" style={s.cancel} onClick={cancel}>Cancel consultation</button></section></PageShell>
 }
 
 const s = {
   card: { margin: 'auto 0', background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 'var(--r-xl)', padding: '30px 22px', boxShadow: 'var(--shadow-md)', textAlign: 'center' },
   icon: { margin: '0 auto 16px', width: 64, height: 64, borderRadius: '50%', background: 'var(--blue-light)', color: 'var(--blue)', display: 'grid', placeItems: 'center' },
-  ready: { background: 'var(--green-light)', color: 'var(--green)' }, eyebrow: { color: 'var(--teal-dark)', fontSize: 12, fontWeight: 700, letterSpacing: '.08em' }, title: { color: 'var(--text-h)', fontSize: 24, margin: '6px 0 10px' }, text: { color: 'var(--text)', lineHeight: 1.6, margin: '0 auto 20px', maxWidth: 360 },
-  doctor: { display: 'grid', gap: 4, textAlign: 'left', padding: '14px', border: '1px solid var(--teal-border)', background: 'var(--teal-light)', borderRadius: 'var(--r-md)', color: 'var(--text-h)' }, network: { display: 'flex', gap: 8, textAlign: 'left', alignItems: 'center', color: '#92400e', background: 'var(--amber-light)', border: '1px solid var(--amber-border)', borderRadius: 'var(--r-sm)', padding: '10px', marginTop: 14, fontSize: 13 }, note: { fontSize: 12, color: 'var(--text-muted)', margin: '20px 0' }, cancel: { border: '1px solid var(--border-dark)', background: '#fff', color: 'var(--text)', borderRadius: 'var(--r-sm)', minHeight: 44, padding: '0 18px', fontWeight: 600, cursor: 'pointer' }, primary: { display: 'inline-flex', minHeight: 44, alignItems: 'center', padding: '0 18px', borderRadius: 'var(--r-sm)', background: 'var(--blue)', color: '#fff', textDecoration: 'none', fontWeight: 600 },
+  ready: { background: 'var(--green-light)', color: 'var(--green)' },
+  eyebrow: { color: 'var(--teal-dark)', fontSize: 12, fontWeight: 700, letterSpacing: '.08em' },
+  title: { color: 'var(--text-h)', fontSize: 24, margin: '6px 0 10px' },
+  text: { color: 'var(--text)', lineHeight: 1.6, margin: '0 auto 20px', maxWidth: 360 },
+  doctor: { display: 'grid', gap: 4, textAlign: 'left', padding: '14px', border: '1px solid var(--teal-border)', background: 'var(--teal-light)', borderRadius: 'var(--r-md)', color: 'var(--text-h)' },
+  network: { display: 'flex', gap: 8, textAlign: 'left', alignItems: 'center', color: '#92400e', background: 'var(--amber-light)', border: '1px solid var(--amber-border)', borderRadius: 'var(--r-sm)', padding: '10px', marginTop: 14, fontSize: 13 },
+  note: { fontSize: 12, color: 'var(--text-muted)', margin: '20px 0' },
+  cancel: { border: '1px solid var(--border-dark)', background: '#fff', color: 'var(--text)', borderRadius: 'var(--r-sm)', minHeight: 44, padding: '0 18px', fontWeight: 600, cursor: 'pointer' },
+  primary: { display: 'inline-flex', minHeight: 44, alignItems: 'center', padding: '0 18px', borderRadius: 'var(--r-sm)', background: 'var(--blue)', color: '#fff', textDecoration: 'none', fontWeight: 600 },
 }

@@ -1,51 +1,33 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from 'react'
-
-import {
-  useNavigate,
-  useParams,
-  useLocation,
-} from 'react-router-dom'
-
-import {
-  FileText,
-  Mic,
+  CheckCircle,
   Edit2,
+  FileText,
+  Loader,
+  Mic,
+  RefreshCw,
   RotateCcw,
   Send,
-  Loader,
-  CheckCircle,
   WifiOff,
-  RefreshCw,
 } from 'lucide-react'
-
 import PageShell from '../components/PageShell.jsx'
-
 import {
   createSession,
+  getSavedPatientSession,
+  savePatientSession,
+  submitAudioInput,
   submitTextInput,
 } from '../services/sessionService.js'
-
 import {
+  clearQueue,
   enqueue,
   flush,
-  clearQueue,
-  onQueueStateChange,
   getQueueState,
+  onQueueStateChange,
 } from '../services/syncQueue.js'
-
 import { useOnlineStatus } from '../hooks/useOnlineStatus.js'
-
 import { friendlyApiError } from '../services/errors.js'
-
-
-// ============================================================
-// LANGUAGE NAMES
-// ============================================================
 
 const LANG_NAMES = {
   gu: 'Gujarati',
@@ -60,55 +42,36 @@ const LANG_NAMES = {
   en: 'English',
 }
 
-
-// ============================================================
-// HELPERS
-// ============================================================
-
 function formatDuration(secs) {
-  const m = String(
-    Math.floor(secs / 60),
-  ).padStart(2, '0')
-
-  const s = String(
-    secs % 60,
-  ).padStart(2, '0')
-
+  const m = String(Math.floor(secs / 60)).padStart(2, '0')
+  const s = String(secs % 60).padStart(2, '0')
   return `${m}:${s}`
 }
 
-
-// ============================================================
-// COMPONENT
-// ============================================================
-
 export default function InputReview() {
   const { doctorCode } = useParams()
-
   const navigate = useNavigate()
-
-  const { state } = useLocation()
-
+  const { state: routeState } = useLocation()
   const { online } = useOnlineStatus()
+  const savedSession = getSavedPatientSession()
+  const state =
+    routeState ??
+    (
+      savedSession?.doctorCode === doctorCode &&
+      savedSession?.reviewData &&
+      savedSession?.sessionId
+        ? {
+          ...savedSession.reviewData,
+          sessionId: savedSession.sessionId,
+          doctorName: savedSession.doctorName,
+          doctorId: savedSession.doctorId,
+        }
+        : null
+    )
 
-
-  // ----------------------------------------------------------
-  // STATE
-  // ----------------------------------------------------------
-
-  const [submitState, setSubmitState] =
-    useState('idle')
-
-  const [errorMsg, setErrorMsg] =
-    useState('')
-
-  const submittedRef =
-    useRef(false)
-
-
-  // ----------------------------------------------------------
-  // SESSION DATA
-  // ----------------------------------------------------------
+  const [submitState, setSubmitState] = useState('idle')
+  const [errorMsg, setErrorMsg] = useState('')
+  const submittedRef = useRef(false)
 
   const valid = !!(
     state?.type &&
@@ -123,133 +86,130 @@ export default function InputReview() {
   } = state ?? {}
 
   const langName =
-    LANG_NAMES[language] ?? language
-
-
-  // ----------------------------------------------------------
-  // SUBMIT + AI PROCESSING
-  // ----------------------------------------------------------
+    type === 'voice'
+      ? 'Auto-detected'
+      : LANG_NAMES[language] ?? language
 
   const doSubmit = useCallback(
-    async item => {
+    async (item) => {
+      if (item.type === 'voice') {
+        if (!item.audioBlob) {
+          throw new Error('The voice recording is no longer available. Please record your symptoms again.')
+        }
 
-      // ------------------------------------------------------
-      // 1. Send patient input
-      // ------------------------------------------------------
-
-      if (item.text?.trim()) {
-
-        await submitTextInput(
+        await submitAudioInput(
           item.sessionId,
-          item.text,
-          item.language,
+          item.audioBlob,
         )
-
-      } else {
-        throw new Error('No voice transcript was captured. Please record again or type your symptoms.')
+        return
       }
+
+      if (!item.text?.trim()) {
+        throw new Error('Please enter your symptoms.')
+      }
+
+      await submitTextInput(
+        item.sessionId,
+        item.text,
+        item.language,
+      )
     },
     [],
   )
 
-
-  // ----------------------------------------------------------
-  // QUEUE STATE
-  // ----------------------------------------------------------
-
   useEffect(() => {
-
     if (!valid) {
-      return
+      return undefined
     }
 
-    const unsubscribe =
-      onQueueStateChange(qs => {
+    savePatientSession({
+      currentPath: `/review/${doctorCode}`,
+      sessionId,
+      doctorCode,
+      doctorName,
+      doctorId: state.doctorId,
+      reviewData: {
+        type,
+        language,
+        text: state.text,
+        duration: state.duration,
+      },
+    })
 
-        setSubmitState(
-          qs === 'idle'
-            ? 'idle'
-            : qs,
-        )
+    const unsubscribe = onQueueStateChange((queueState) => {
+      setSubmitState(
+        queueState === 'idle'
+          ? 'idle'
+          : queueState,
+      )
 
-        if (qs === 'sent') {
-
-          clearQueue()
-
-          navigate(
-            `/waiting/${sessionId}`,
-            {
-              state: {
-                doctorCode,
-                doctorName,
-              },
-              replace: true,
-            },
-          )
-        }
-      })
+      if (queueState === 'sent') {
+        clearQueue()
+        savePatientSession({
+          currentPath: `/waiting/${sessionId}`,
+          sessionId,
+          doctorCode,
+          doctorName,
+          doctorId: state.doctorId,
+          reviewData: null,
+        })
+        navigate(`/waiting/${sessionId}`, {
+          state: {
+            doctorCode,
+            doctorName,
+          },
+          replace: true,
+        })
+      }
+    })
 
     return unsubscribe
-
   }, [
-    valid,
-    sessionId,
     doctorCode,
     doctorName,
+    language,
     navigate,
+    sessionId,
+    state,
+    type,
+    valid,
   ])
 
-
-  // ----------------------------------------------------------
-  // AUTO FLUSH WHEN ONLINE
-  // ----------------------------------------------------------
-
   useEffect(() => {
-
     if (
       online &&
       getQueueState() === 'failed'
     ) {
       flush(doSubmit)
     }
-
-  }, [
-    online,
-    doSubmit,
-  ])
-
-
-  // ----------------------------------------------------------
-  // INVALID STATE
-  // ----------------------------------------------------------
+  }, [doSubmit, online])
 
   if (!valid) {
-
-    navigate(
-      `/confirm/${doctorCode}`,
-      {
-        replace: true,
-      },
-    )
-
+    navigate(`/confirm/${doctorCode}`, {
+      replace: true,
+    })
     return null
   }
 
-
-  // ----------------------------------------------------------
-  // SUBMIT
-  // ----------------------------------------------------------
+  if (type === 'voice' && !state.audioBlob) {
+    navigate(`/symptoms/${doctorCode}`, {
+      replace: true,
+      state: {
+        sessionId,
+        doctorId: state.doctorId,
+        doctorName,
+      },
+    })
+    return null
+  }
 
   async function handleSubmit() {
-
     if (submittedRef.current) {
       return
     }
 
     submittedRef.current = true
-
     setErrorMsg('')
-
 
     const item = {
       sessionId,
@@ -259,93 +219,56 @@ export default function InputReview() {
       audioBlob: state.audioBlob,
     }
 
-
-    // --------------------------------------------------------
-    // OFFLINE
-    // --------------------------------------------------------
-
     if (!online) {
-
       enqueue(item)
-
       setSubmitState('offline')
-
       submittedRef.current = false
-
       return
     }
 
-
-    // --------------------------------------------------------
-    // ONLINE
-    // --------------------------------------------------------
-
     setSubmitState('loading')
 
-
     try {
-
       await doSubmit(item)
-
       clearQueue()
-
       setSubmitState('sent')
-
-
-      // Give the user a moment to see "Sent"
-      // before moving to the waiting room.
-
-      setTimeout(() => {
-
-        navigate(
-          `/waiting/${sessionId}`,
-          {
-            state: {
-              doctorCode,
-              doctorName,
-            },
-            replace: true,
+      savePatientSession({
+        currentPath: `/waiting/${sessionId}`,
+        sessionId,
+        doctorCode,
+        doctorName,
+        doctorId: state.doctorId,
+        reviewData: null,
+      })
+      window.setTimeout(() => {
+        navigate(`/waiting/${sessionId}`, {
+          state: {
+            doctorCode,
+            doctorName,
           },
-        )
-
+          replace: true,
+        })
       }, 500)
-
-
     } catch (err) {
-
       submittedRef.current = false
 
-
       if (err.offline) {
-
         enqueue(item)
-
         setSubmitState('offline')
-
       } else {
-
-        setErrorMsg(
-          friendlyApiError(err),
-        )
-
+        setErrorMsg(friendlyApiError(err))
         setSubmitState('failed')
       }
     }
   }
 
-
-  // ----------------------------------------------------------
-  // RETRY
-  // ----------------------------------------------------------
-
   async function handleRetry() {
-
     submittedRef.current = false
-
-    const isInactive = errorMsg.includes('no longer active') || errorMsg.includes('expired')
+    const isInactive =
+      errorMsg.includes('no longer active') ||
+      errorMsg.includes('expired')
 
     setErrorMsg('')
-
     clearQueue()
 
     if (isInactive && doctorCode) {
@@ -354,7 +277,6 @@ export default function InputReview() {
       try {
         const newSession = await createSession(doctorCode)
         const newSessionId = newSession.session_id || newSession.id
-
         const item = {
           sessionId: newSessionId,
           type,
@@ -364,22 +286,24 @@ export default function InputReview() {
         }
 
         await doSubmit(item)
-
         setSubmitState('sent')
-
-        setTimeout(() => {
-          navigate(
-            `/waiting/${newSessionId}`,
-            {
-              state: {
-                doctorCode,
-                doctorName,
-              },
-              replace: true,
+        savePatientSession({
+          currentPath: `/waiting/${newSessionId}`,
+          sessionId: newSessionId,
+          doctorCode,
+          doctorName,
+          doctorId: state.doctorId,
+          reviewData: null,
+        })
+        window.setTimeout(() => {
+          navigate(`/waiting/${newSessionId}`, {
+            state: {
+              doctorCode,
+              doctorName,
             },
-          )
+            replace: true,
+          })
         }, 500)
-
       } catch (retryErr) {
         submittedRef.current = false
         setErrorMsg(friendlyApiError(retryErr))
@@ -390,292 +314,116 @@ export default function InputReview() {
     }
 
     setSubmitState('idle')
-
     handleSubmit()
   }
 
-
-  // ----------------------------------------------------------
-  // EDIT
-  // ----------------------------------------------------------
-
   function handleEdit() {
-
     clearQueue()
-
     submittedRef.current = false
-
-    navigate(
-      `/symptoms/${doctorCode}`,
-      {
-        state: {
-          sessionId,
-          doctorId: state.doctorId,
-          doctorName,
-        },
+    savePatientSession({
+      currentPath: `/symptoms/${doctorCode}`,
+      sessionId,
+      doctorCode,
+      doctorName,
+      doctorId: state.doctorId,
+      reviewData: null,
+    })
+    navigate(`/symptoms/${doctorCode}`, {
+      state: {
+        sessionId,
+        doctorId: state.doctorId,
+        doctorName,
       },
-    )
+    })
   }
-
-
-  // ----------------------------------------------------------
-  // LOCK UI
-  // ----------------------------------------------------------
 
   const isLocked =
     submitState === 'loading' ||
     submitState === 'syncing' ||
     submitState === 'sent'
 
-
-  // ==========================================================
-  // UI
-  // ==========================================================
-
   return (
-    <PageShell
-      backTo={`/symptoms/${doctorCode}`}
-    >
-
-      <h2 style={s.heading}>
-        Review your input
-      </h2>
-
-      <p style={s.sub}>
-        Please confirm what you want to send
-        to your doctor.
-      </p>
-
-
-      {/* ====================================================
-          INPUT PREVIEW
-      ==================================================== */}
+    <PageShell backTo={`/symptoms/${doctorCode}`}>
+      <h2 style={s.heading}>Review your input</h2>
+      <p style={s.sub}>Please confirm what you want to send to your doctor.</p>
 
       <div style={s.previewCard}>
-
         <div style={s.previewHeader}>
-
           {type === 'text' ? (
             <>
-              <FileText
-                size={16}
-                color="var(--accent)"
-              />
-
-              <span>
-                Text input
-              </span>
+              <FileText size={16} color="var(--accent)" />
+              <span>Text input</span>
             </>
           ) : (
             <>
-              <Mic
-                size={16}
-                color="var(--accent)"
-              />
-
-              <span>
-                Voice recording
-              </span>
+              <Mic size={16} color="var(--accent)" />
+              <span>Voice recording</span>
             </>
           )}
-
-          <span style={s.langBadge}>
-            {langName}
-          </span>
-
+          <span style={s.langBadge}>{langName}</span>
         </div>
 
-
-        {/* TEXT */}
-
         {type === 'text' && (
-          <p style={s.previewText}>
-            {state.text}
-          </p>
+          <p style={s.previewText}>{state.text}</p>
         )}
 
-
-        {/* VOICE */}
-
         {type === 'voice' && (
-
           <div style={s.voiceSummary}>
-
             <div style={s.voiceIcon}>
-              <Mic
-                size={24}
-                color="var(--accent)"
-              />
+              <Mic size={24} color="var(--accent)" />
             </div>
-
             <div>
-
-              <p style={s.voiceDuration}>
-                {formatDuration(
-                  state.duration ?? 0,
-                )}
-              </p>
-
-              <p style={s.voiceMeta}>
-                Recording ready · {langName}
-              </p>
-
+              <p style={s.voiceDuration}>{formatDuration(state.duration ?? 0)}</p>
+              <p style={s.voiceMeta}>Recording ready - language will be detected from audio</p>
             </div>
-
           </div>
         )}
 
         {type === 'voice' && state.text && (
           <p style={s.previewText}>{state.text}</p>
         )}
-
       </div>
 
-
-      {/* ====================================================
-          OFFLINE
-      ==================================================== */}
-
       {submitState === 'offline' && (
-
-        <div
-          style={{
-            ...s.statusStrip,
-            ...s.stripOffline,
-          }}
-        >
-
+        <div style={{ ...s.statusStrip, ...s.stripOffline }}>
           <WifiOff size={14} />
-
-          <span>
-            No connection — will send
-            automatically when you reconnect.
-          </span>
-
+          <span>No connection - will send automatically when you reconnect.</span>
         </div>
       )}
-
-
-      {/* ====================================================
-          PROCESSING
-      ==================================================== */}
 
       {submitState === 'loading' && (
-
-        <div
-          style={{
-            ...s.statusStrip,
-            ...s.stripSyncing,
-          }}
-        >
-
-          <Loader
-            size={14}
-            style={{
-              animation:
-                'spin 0.8s linear infinite',
-            }}
-          />
-
-          <span>
-            Sending to VaaniDoc AI…
-          </span>
-
+        <div style={{ ...s.statusStrip, ...s.stripSyncing }}>
+          <Loader size={14} style={{ animation: 'spin 0.8s linear infinite' }} />
+          <span>Sending to VaaniDoc AI...</span>
         </div>
       )}
-
-
-      {/* ====================================================
-          SYNCING
-      ==================================================== */}
 
       {submitState === 'syncing' && (
-
-        <div
-          style={{
-            ...s.statusStrip,
-            ...s.stripSyncing,
-          }}
-        >
-
-          <Loader
-            size={14}
-            style={{
-              animation:
-                'spin 0.8s linear infinite',
-            }}
-          />
-
-          <span>
-            Sending…
-          </span>
-
+        <div style={{ ...s.statusStrip, ...s.stripSyncing }}>
+          <Loader size={14} style={{ animation: 'spin 0.8s linear infinite' }} />
+          <span>Sending...</span>
         </div>
       )}
-
-
-      {/* ====================================================
-          SENT
-      ==================================================== */}
 
       {submitState === 'sent' && (
-
-        <div
-          style={{
-            ...s.statusStrip,
-            ...s.stripSent,
-          }}
-        >
-
+        <div style={{ ...s.statusStrip, ...s.stripSent }}>
           <CheckCircle size={14} />
-
-          <span>
-            AI intake generated successfully.
-          </span>
-
+          <span>AI intake generated successfully.</span>
         </div>
       )}
 
-
-      {/* ====================================================
-          ERROR
-      ==================================================== */}
-
-      {(
-        submitState === 'failed' ||
-        submitState === 'error'
-      ) && (
-
-          <div
-            style={{
-              ...s.statusStrip,
-              ...s.stripFailed,
-            }}
-          >
-
-            <span>
-              {errorMsg ||
-                'Submission failed. Please try again.'}
-            </span>
-
-          </div>
-        )}
-
-
-      {/* ====================================================
-          ACTIONS
-      ==================================================== */}
+      {(submitState === 'failed' || submitState === 'error') && (
+        <div style={{ ...s.statusStrip, ...s.stripFailed }}>
+          <span>{errorMsg || 'Submission failed. Please try again.'}</span>
+        </div>
+      )}
 
       <div style={s.actions}>
-
-        {/* EDIT */}
-
         <button
           style={s.editBtn}
           onClick={handleEdit}
           disabled={isLocked}
         >
-
           {type === 'text' ? (
             <>
               <Edit2 size={15} />
@@ -687,202 +435,127 @@ export default function InputReview() {
               Record Again
             </>
           )}
-
         </button>
 
-
-        {/* SUBMIT / RETRY */}
-
-        {(
-          submitState === 'failed' ||
-          submitState === 'error'
-        ) ? (
-
-          <button
-            style={s.submitBtn}
-            onClick={handleRetry}
-          >
-
+        {(submitState === 'failed' || submitState === 'error') ? (
+          <button style={s.submitBtn} onClick={handleRetry}>
             <RefreshCw size={15} />
-
             {errorMsg.includes('no longer active') || errorMsg.includes('expired')
               ? 'Start New Session & Submit'
               : 'Retry'}
-
           </button>
-
         ) : (
-
           <button
-            style={{
-              ...s.submitBtn,
-              opacity:
-                isLocked ? 0.7 : 1,
-            }}
+            style={{ ...s.submitBtn, opacity: isLocked ? 0.7 : 1 }}
             onClick={handleSubmit}
-            disabled={
-              isLocked ||
-              submitState === 'offline'
-            }
+            disabled={isLocked || submitState === 'offline'}
           >
-
             {submitState === 'loading' ? (
-
               <>
-                <Loader
-                  size={15}
-                  style={{
-                    animation:
-                      'spin 0.8s linear infinite',
-                  }}
-                />
-
-                Processing…
+                <Loader size={15} style={{ animation: 'spin 0.8s linear infinite' }} />
+                Processing...
               </>
-
             ) : submitState === 'syncing' ? (
-
               <>
-                <Loader
-                  size={15}
-                  style={{
-                    animation:
-                      'spin 0.8s linear infinite',
-                  }}
-                />
-
-                Syncing…
+                <Loader size={15} style={{ animation: 'spin 0.8s linear infinite' }} />
+                Syncing...
               </>
-
             ) : submitState === 'offline' ? (
-
               <>
                 <WifiOff size={15} />
-
                 Waiting for connection
               </>
-
             ) : submitState === 'sent' ? (
-
               <>
                 <CheckCircle size={15} />
-
                 Sent
               </>
-
             ) : (
-
               <>
                 <Send size={15} />
-
                 Submit
               </>
             )}
-
           </button>
         )}
-
       </div>
-
     </PageShell>
   )
 }
 
-
-// ============================================================
-// STYLES
-// ============================================================
-
 const s = {
-
   heading: {
     margin: 0,
     fontSize: 20,
     fontWeight: 600,
     color: 'var(--text-h)',
   },
-
   sub: {
     margin: 0,
     fontSize: 14,
     color: 'var(--text)',
   },
-
   previewCard: {
-    border:
-      '1.5px solid var(--border)',
+    border: '1.5px solid var(--border)',
     borderRadius: 12,
     overflow: 'hidden',
   },
-
   previewHeader: {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
     padding: '10px 14px',
-    borderBottom:
-      '1px solid var(--border)',
-    background:
-      'var(--accent-bg)',
+    borderBottom: '1px solid var(--border)',
+    background: 'var(--accent-bg)',
     fontSize: 13,
     fontWeight: 600,
     color: 'var(--text-h)',
   },
-
   langBadge: {
     marginLeft: 'auto',
     fontSize: 12,
     padding: '2px 8px',
     borderRadius: 20,
-    background:
-      'var(--accent)',
+    background: 'var(--accent)',
     color: '#fff',
   },
-
   previewText: {
     margin: 0,
-    padding: '14px',
+    padding: 14,
     fontSize: 15,
     color: 'var(--text-h)',
     lineHeight: 1.6,
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
   },
-
   voiceSummary: {
     display: 'flex',
     alignItems: 'center',
     gap: 14,
-    padding: '16px',
+    padding: 16,
   },
-
   voiceIcon: {
     width: 48,
     height: 48,
     borderRadius: '50%',
-    background:
-      'var(--accent-bg)',
+    background: 'var(--accent-bg)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
-
   voiceDuration: {
     margin: '0 0 2px',
     fontSize: 22,
     fontWeight: 700,
     color: 'var(--text-h)',
-    fontVariantNumeric:
-      'tabular-nums',
+    fontVariantNumeric: 'tabular-nums',
   },
-
   voiceMeta: {
     margin: 0,
     fontSize: 13,
     color: 'var(--text)',
   },
-
   statusStrip: {
     display: 'flex',
     alignItems: 'center',
@@ -892,68 +565,52 @@ const s = {
     fontSize: 13,
     fontWeight: 500,
   },
-
   stripOffline: {
-    background:
-      'rgba(245,158,11,0.1)',
-    border:
-      '1px solid rgba(245,158,11,0.3)',
+    background: 'rgba(245,158,11,0.1)',
+    border: '1px solid rgba(245,158,11,0.3)',
     color: '#92400e',
   },
-
   stripSyncing: {
-    background:
-      'var(--accent-bg)',
-    border:
-      '1px solid var(--accent-border)',
+    background: 'var(--accent-bg)',
+    border: '1px solid var(--accent-border)',
     color: 'var(--accent)',
   },
-
   stripSent: {
-    background:
-      'rgba(34,197,94,0.1)',
-    border:
-      '1px solid rgba(34,197,94,0.3)',
+    background: 'rgba(34,197,94,0.1)',
+    border: '1px solid rgba(34,197,94,0.3)',
     color: '#166534',
   },
-
   stripFailed: {
-    background:
-      'rgba(239,68,68,0.1)',
-    border:
-      '1px solid rgba(239,68,68,0.3)',
+    background: 'rgba(239,68,68,0.1)',
+    border: '1px solid rgba(239,68,68,0.3)',
     color: '#991b1b',
   },
-
   actions: {
     display: 'flex',
     gap: 10,
   },
-
   editBtn: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
     flex: 1,
-    padding: '12px',
+    padding: 12,
     borderRadius: 10,
-    border:
-      '1.5px solid var(--border)',
+    border: '1.5px solid var(--border)',
     background: 'var(--bg)',
     color: 'var(--text-h)',
     fontSize: 15,
     fontWeight: 500,
     cursor: 'pointer',
   },
-
   submitBtn: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
     flex: 2,
-    padding: '12px',
+    padding: 12,
     borderRadius: 10,
     border: 'none',
     background: 'var(--accent)',

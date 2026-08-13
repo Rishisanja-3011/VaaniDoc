@@ -107,6 +107,7 @@ function Header({
   const logout = () => {
     localStorage.removeItem('vaanidoc_access_token')
     localStorage.removeItem('vaanidoc_refresh_token')
+    localStorage.removeItem('vaanidoc_dashboard_state')
 
     setShowProfile(false)
 

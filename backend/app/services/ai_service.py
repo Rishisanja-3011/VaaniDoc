@@ -1,8 +1,10 @@
 import os
+import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types
 from pydantic import BaseModel, Field, ValidationError
 
 
@@ -38,6 +40,11 @@ class ClinicalIntake(BaseModel):
     possible_symptom_categories: list[str]
     urgency: str
     confidence: Confidence
+
+
+class AudioTranscription(BaseModel):
+    language: str
+    transcript: str
 
 
 SYSTEM_PROMPT = """
@@ -378,3 +385,122 @@ Return the structured English clinical intake.
         # In production/demo, if Gemini API fails due to rate limit (429) or API error,
         # fallback safely to the rule-based clinical intake parser to ensure demo resilience.
         return generate_demo_fallback_intake(text, language)
+
+
+def transcribe_patient_audio(
+    audio_bytes: bytes,
+    mime_type: str,
+) -> dict:
+    if not audio_bytes:
+        raise ValueError("Patient audio cannot be empty.")
+
+    api_key = os.getenv("GEMINI_API_KEY")
+
+    if not api_key:
+        raise AIProcessingError(
+            "Voice transcription is unavailable because the Gemini API key is not configured."
+        )
+
+    suffix = {
+        "audio/webm": ".webm",
+        "audio/mp4": ".mp4",
+        "audio/mpeg": ".mp3",
+        "audio/wav": ".wav",
+        "audio/ogg": ".ogg",
+    }.get(mime_type, ".webm")
+
+    temp_path = None
+    uploaded_file = None
+
+    try:
+        client = genai.Client(api_key=api_key)
+
+        with tempfile.NamedTemporaryFile(
+            suffix=suffix,
+            delete=False,
+        ) as temp_file:
+            temp_file.write(audio_bytes)
+            temp_path = temp_file.name
+
+        uploaded_file = client.files.upload(
+            file=temp_path,
+            config=types.UploadFileConfig(
+                display_name="patient-audio",
+                mime_type=mime_type,
+            ),
+        )
+
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[
+                uploaded_file,
+                """
+Transcribe this patient audio.
+
+Requirements:
+1. Detect the spoken language automatically from the audio.
+2. Return the transcript in the patient's original spoken language.
+3. Return the detected language as a short lowercase code such as en, hi, gu, mr, ta, te, kn, ml, bn, or pa.
+4. If multiple languages are present, return the primary spoken language.
+5. Return only valid JSON.
+""",
+            ],
+            config={
+                "response_mime_type": "application/json",
+                "response_json_schema": AudioTranscription.model_json_schema(),
+                "temperature": 0,
+            },
+        )
+
+        if not response.text:
+            raise AIProcessingError(
+                "Gemini returned an empty audio transcription response."
+            )
+
+        result = AudioTranscription.model_validate_json(
+            response.text
+        )
+
+        transcript = result.transcript.strip()
+        language = result.language.strip().lower()
+
+        if not transcript:
+            raise AIProcessingError(
+                "Gemini returned an empty patient transcript."
+            )
+
+        if not language:
+            raise AIProcessingError(
+                "Gemini did not detect the patient language."
+            )
+
+        return {
+            "transcript": transcript,
+            "language": language,
+        }
+
+    except ValidationError as exc:
+        raise AIProcessingError(
+            "Gemini returned an invalid audio transcription structure."
+        ) from exc
+
+    except AIProcessingError:
+        raise
+
+    except Exception as exc:
+        raise AIProcessingError(
+            f"Unable to transcribe patient audio: {exc}"
+        ) from exc
+
+    finally:
+        if uploaded_file is not None:
+            try:
+                client.files.delete(name=uploaded_file.name)
+            except Exception:
+                pass
+
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
