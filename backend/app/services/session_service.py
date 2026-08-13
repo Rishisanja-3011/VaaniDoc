@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.core.supabase import supabase_admin
 
@@ -13,6 +13,37 @@ VALID_STATUSES = {
 }
 
 
+# ============================================================
+# VALID SESSION STATE TRANSITIONS
+# ============================================================
+
+ALLOWED_TRANSITIONS = {
+    "waiting": {
+        "processing",
+        "cancelled",
+    },
+    "processing": {
+        "waiting",
+        "ready",
+        "cancelled",
+    },
+    "ready": {
+        "active",
+        "cancelled",
+    },
+    "active": {
+        "completed",
+        "cancelled",
+    },
+    "completed": set(),
+    "cancelled": set(),
+}
+
+
+# Abandoned sessions are temporary and should not remain forever.
+SESSION_TTL_MINUTES = 30
+
+
 def _first_row(response):
     if not response.data:
         return None
@@ -20,11 +51,28 @@ def _first_row(response):
     return response.data[0]
 
 
+def _session_response(session: dict) -> dict:
+    return {
+        "session_id": session["id"],
+        "doctor_id": session["doctor_id"],
+        "status": session["status"],
+        "created_at": session["created_at"],
+        "started_at": session.get("started_at"),
+        "completed_at": session.get("completed_at"),
+        "expires_at": session.get("expires_at"),
+    }
+
+
 # ============================================================
 # CREATE SESSION
 # ============================================================
 
 def create_session(doctor_id: str) -> dict:
+    expires_at = (
+        datetime.now(timezone.utc)
+        + timedelta(minutes=SESSION_TTL_MINUTES)
+    ).isoformat()
+
     response = (
         supabase_admin
         .table("active_sessions")
@@ -32,6 +80,7 @@ def create_session(doctor_id: str) -> dict:
             {
                 "doctor_id": doctor_id,
                 "status": "waiting",
+                "expires_at": expires_at,
             }
         )
         .execute()
@@ -51,6 +100,7 @@ def create_session(doctor_id: str) -> dict:
         "input": None,
         "intake": None,
         "created_at": session["created_at"],
+        "expires_at": session.get("expires_at"),
     }
 
 
@@ -73,15 +123,7 @@ def get_session(session_id: str) -> dict | None:
     if session is None:
         return None
 
-    return {
-        "session_id": session["id"],
-        "doctor_id": session["doctor_id"],
-        "status": session["status"],
-        "created_at": session["created_at"],
-        "started_at": session.get("started_at"),
-        "completed_at": session.get("completed_at"),
-        "expires_at": session.get("expires_at"),
-    }
+    return _session_response(session)
 
 
 # ============================================================
@@ -92,8 +134,7 @@ def get_doctor_sessions(
     doctor_id: str,
 ) -> list[dict]:
     """
-    Return only patients that have completed the
-    AI intake processing and are ready for consultation.
+    Return patients whose AI intake is ready for consultation.
 
     Waiting / processing patients are intentionally excluded.
     Completed / cancelled patients are also excluded.
@@ -116,21 +157,7 @@ def get_doctor_sessions(
 
     for session in response.data or []:
         sessions.append(
-            {
-                "session_id": session["id"],
-                "doctor_id": session["doctor_id"],
-                "status": session["status"],
-                "created_at": session["created_at"],
-                "started_at": session.get(
-                    "started_at"
-                ),
-                "completed_at": session.get(
-                    "completed_at"
-                ),
-                "expires_at": session.get(
-                    "expires_at"
-                ),
-            }
+            _session_response(session)
         )
 
     return sessions
@@ -200,6 +227,29 @@ def update_session_status(
             f"Invalid session status: {status}"
         )
 
+    current_session = get_session(session_id)
+
+    if current_session is None:
+        return None
+
+    current_status = current_session["status"]
+
+    if status == current_status:
+        raise ValueError(
+            f"Session is already in status: {status}"
+        )
+
+    allowed_statuses = ALLOWED_TRANSITIONS.get(
+        current_status,
+        set(),
+    )
+
+    if status not in allowed_statuses:
+        raise ValueError(
+            f"Invalid session transition: "
+            f"{current_status} -> {status}"
+        )
+
     update_data = {
         "status": status,
     }
@@ -234,21 +284,7 @@ def update_session_status(
     if session is None:
         return None
 
-    return {
-        "session_id": session["id"],
-        "doctor_id": session["doctor_id"],
-        "status": session["status"],
-        "created_at": session["created_at"],
-        "started_at": session.get(
-            "started_at"
-        ),
-        "completed_at": session.get(
-            "completed_at"
-        ),
-        "expires_at": session.get(
-            "expires_at"
-        ),
-    }
+    return _session_response(session)
 
 
 # ============================================================
@@ -263,6 +299,12 @@ def save_patient_input(
     session = get_session(session_id)
 
     if session is None:
+        return None
+
+    if session["status"] in {
+        "completed",
+        "cancelled",
+    }:
         return None
 
     response = (
@@ -309,6 +351,12 @@ def save_intake(
     session = get_session(session_id)
 
     if session is None:
+        return None
+
+    if session["status"] in {
+        "completed",
+        "cancelled",
+    }:
         return None
 
     english = intake["english_intake"]

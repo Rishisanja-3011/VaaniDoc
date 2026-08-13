@@ -53,18 +53,25 @@ class ClinicalIntake(BaseModel):
 # ERROR RECOVERY
 # ============================================================
 
-def restore_session_to_active(session_id: str) -> None:
+def restore_session_to_waiting(session_id: str) -> None:
     """
-    Best-effort recovery if processing fails.
+    Best-effort recovery if AI processing fails.
+
+    The doctor has not started the consultation yet.
+    Therefore the session must return to waiting so that
+    processing can be retried.
     """
 
     try:
         update_session_status(
             session_id,
-            "active",
+            "waiting",
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        print(
+            f"Failed to restore session "
+            f"{session_id} to waiting: {exc}"
+        )
 
 
 # ============================================================
@@ -145,13 +152,23 @@ async def process_session(
 
     Flow:
 
-        temporary_inputs
-              ↓
+        waiting
+            ↓
+        processing
+            ↓
         AI processing
-              ↓
+            ↓
         temporary_intakes
-              ↓
-        session = ready
+            ↓
+        ready
+
+    If AI processing fails:
+
+        processing
+            ↓
+        waiting
+
+    This allows the session to be retried.
     """
 
     # --------------------------------------------------------
@@ -181,6 +198,16 @@ async def process_session(
             detail="Session is no longer active.",
         )
 
+    # AI processing should begin from waiting.
+    if session["status"] != "waiting":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Session is not ready for AI processing. "
+                f"Current status: {session['status']}"
+            ),
+        )
+
     # --------------------------------------------------------
     # 3. GET LATEST PATIENT INPUT
     # --------------------------------------------------------
@@ -205,13 +232,19 @@ async def process_session(
     except APIError as exc:
         raise HTTPException(
             status_code=503,
-            detail="Unable to read patient input from the database.",
+            detail=(
+                "Unable to read patient input "
+                "from the database."
+            ),
         ) from exc
 
     if not input_response.data:
         raise HTTPException(
             status_code=404,
-            detail="No patient input found for this session.",
+            detail=(
+                "No patient input found "
+                "for this session."
+            ),
         )
 
     patient_input = input_response.data[0]
@@ -294,10 +327,15 @@ async def process_session(
 
     try:
 
-        update_session_status(
+        processing_session = update_session_status(
             session_id,
             "processing",
         )
+
+        if processing_session is None:
+            raise RuntimeError(
+                "Failed to update session status to processing."
+            )
 
         # ----------------------------------------------------
         # 6. RUN AI
@@ -350,7 +388,7 @@ async def process_session(
 
     except ValueError as exc:
 
-        restore_session_to_active(
+        restore_session_to_waiting(
             session_id
         )
 
@@ -365,7 +403,7 @@ async def process_session(
 
     except AIProcessingError as exc:
 
-        restore_session_to_active(
+        restore_session_to_waiting(
             session_id
         )
 
@@ -380,13 +418,16 @@ async def process_session(
 
     except APIError as exc:
 
-        restore_session_to_active(
+        restore_session_to_waiting(
             session_id
         )
 
         raise HTTPException(
             status_code=503,
-            detail="AI intake could not be saved to the database.",
+            detail=(
+                "AI intake could not be saved "
+                "to the database."
+            ),
         ) from exc
 
     # --------------------------------------------------------
@@ -395,7 +436,7 @@ async def process_session(
 
     except RuntimeError as exc:
 
-        restore_session_to_active(
+        restore_session_to_waiting(
             session_id
         )
 
@@ -406,7 +447,7 @@ async def process_session(
 
     except Exception as exc:
 
-        restore_session_to_active(
+        restore_session_to_waiting(
             session_id
         )
 
