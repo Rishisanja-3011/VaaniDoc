@@ -56,7 +56,7 @@ export default function QRScanner() {
       </div>
 
       {/* Camera — always in DOM */}
-      <div style={{ ...s.viewportWrap, display: status === 'scanning' ? 'flex' : 'none' }}>
+      <div style={{ ...s.viewportWrap, display: status ==='starting' || status ==='scanning' ? 'flex' : 'none', }}>
         <div style={s.scanFrame}>
           <div id={QR_ELEMENT_ID} style={s.viewport} />
           {/* Corner decorations */}
