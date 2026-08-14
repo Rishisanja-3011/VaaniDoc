@@ -11,7 +11,14 @@ import {
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../services/api'
 import { QRCodeSVG } from 'qrcode.react'
-
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
 function DoctorCode({ onNavigate }) {
   const [doctor, setDoctor] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -124,18 +131,275 @@ function DoctorCode({ onNavigate }) {
   }
 
   function handleDownloadQR() {
-    if (!qrValue) return
+  if (!qrValue) return
 
-    /*
-     * The backend already provides the real QR value.
-     *
-     * For now we open the QR value so the user can access
-     * the actual doctor join URL. The visual QR generator
-     * can be connected separately without changing the
-     * doctor identity flow.
-     */
-    window.open(qrValue, '_blank', 'noopener,noreferrer')
+  // Get the QR SVG that is already rendered on this page.
+  const qrSvg = document.getElementById('vaanidoc-doctor-qr')
+
+  if (!qrSvg) {
+    setError('Unable to prepare the QR code. Please try again.')
+    return
   }
+
+  // Open a new tab immediately so browsers don't block the popup.
+  const qrWindow = window.open('', '_blank')
+
+  if (!qrWindow) {
+    setError('Please allow pop-ups for VaaniDoc to view your QR code.')
+    return
+  }
+
+  const svgMarkup = qrSvg.outerHTML
+
+  qrWindow.document.write(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>VaaniDoc Doctor QR Code</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+        <style>
+          * {
+            box-sizing: border-box;
+          }
+
+          body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: #f1f5f9;
+            font-family: Arial, sans-serif;
+            color: #0f172a;
+          }
+
+          .card {
+            width: 100%;
+            max-width: 430px;
+            background: white;
+            border-radius: 20px;
+            padding: 32px 24px;
+            text-align: center;
+            box-shadow: 0 10px 35px rgba(15, 23, 42, 0.12);
+          }
+
+          .brand {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 6px;
+          }
+
+          .subtitle {
+            color: #64748b;
+            font-size: 14px;
+            margin-bottom: 24px;
+          }
+
+          .qr {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+          }
+
+          .doctor-name {
+            margin-top: 22px;
+            font-size: 18px;
+            font-weight: 700;
+          }
+
+          .doctor-code {
+            margin-top: 6px;
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            color: #0f766e;
+          }
+
+          .url {
+            margin-top: 12px;
+            padding: 10px;
+            border-radius: 10px;
+            background: #f8fafc;
+            color: #64748b;
+            font-size: 11px;
+            word-break: break-all;
+          }
+
+          button {
+            width: 100%;
+            margin-top: 24px;
+            padding: 14px 18px;
+            border: 0;
+            border-radius: 12px;
+            background: #2563eb;
+            color: white;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+          }
+
+          button:active {
+            transform: scale(0.98);
+          }
+
+          .note {
+            margin-top: 14px;
+            color: #64748b;
+            font-size: 12px;
+            line-height: 1.5;
+          }
+
+          @media print {
+            body {
+              background: white;
+            }
+
+            button,
+            .note {
+              display: none;
+            }
+
+            .card {
+              box-shadow: none;
+            }
+          }
+        </style>
+      </head>
+
+      <body>
+        <div class="card">
+          <div class="brand">VaaniDoc</div>
+          <div class="subtitle">Doctor Consultation QR Code</div>
+
+          <div class="qr">
+            ${svgMarkup}
+          </div>
+
+          <div class="doctor-name">
+            ${escapeHtml(doctorName)}
+          </div>
+
+          <div class="doctor-code">
+            ${escapeHtml(doctorCode)}
+          </div>
+
+          <div class="url">
+            ${escapeHtml(qrValue)}
+          </div>
+
+          <button id="downloadQr">
+            Download QR Code
+          </button>
+
+          <div class="note">
+            This QR code is permanent for your doctor account.
+            Patients can scan it to connect with you.
+          </div>
+        </div>
+
+        <script>
+          function downloadQrCode() {
+            const svg = document.querySelector('.qr svg')
+
+            if (!svg) {
+              alert('Unable to find QR code.')
+              return
+            }
+
+            const serializer = new XMLSerializer()
+            const svgString = serializer.serializeToString(svg)
+
+            const svgBlob = new Blob(
+              [svgString],
+              { type: 'image/svg+xml;charset=utf-8' }
+            )
+
+            const url = URL.createObjectURL(svgBlob)
+
+            const image = new Image()
+
+            image.onload = function () {
+              const canvas = document.createElement('canvas')
+
+              const padding = 40
+              const size = 800
+
+              canvas.width = size + padding * 2
+              canvas.height = size + padding * 2
+
+              const context = canvas.getContext('2d')
+
+              context.fillStyle = '#ffffff'
+              context.fillRect(
+                0,
+                0,
+                canvas.width,
+                canvas.height
+              )
+
+              context.drawImage(
+                image,
+                padding,
+                padding,
+                size,
+                size
+              )
+
+              URL.revokeObjectURL(url)
+
+              canvas.toBlob(function (blob) {
+                if (!blob) {
+                  alert('Unable to download QR code.')
+                  return
+                }
+
+                const downloadUrl =
+                  URL.createObjectURL(blob)
+
+                const link =
+                  document.createElement('a')
+
+                link.href = downloadUrl
+                link.download =
+                  'VaaniDoc-${doctorCode}-QR.png'
+
+                document.body.appendChild(link)
+                link.click()
+                link.remove()
+
+                setTimeout(function () {
+                  URL.revokeObjectURL(downloadUrl)
+                }, 1000)
+              }, 'image/png')
+            }
+
+            image.onerror = function () {
+              URL.revokeObjectURL(url)
+              alert('Unable to prepare QR code.')
+            }
+
+            image.src = url
+          }
+
+          document
+            .getElementById('downloadQr')
+            .addEventListener(
+              'click',
+              downloadQrCode
+            )
+        </script>
+      </body>
+    </html>
+  `)
+
+  qrWindow.document.close()
+}
 
   if (loading) {
     return (
@@ -275,7 +539,19 @@ function DoctorCode({ onNavigate }) {
 
         {/* QR */}
         <div className="qr-placeholder">
-          {qrValue ? <QRCodeSVG value={qrValue} size={150} includeMargin /> : <QrCode size={150} strokeWidth={1.4} />}
+          {qrValue ? (
+  <QRCodeSVG
+    id="vaanidoc-doctor-qr"
+    value={qrValue}
+    size={150}
+    includeMargin
+  />
+) : (
+  <QrCode
+    size={150}
+    strokeWidth={1.4}
+  />
+)}
 
           <span>
             Doctor QR Code
@@ -294,7 +570,7 @@ function DoctorCode({ onNavigate }) {
           disabled={!qrValue}
         >
           <Download size={17} />
-          Open Doctor QR Link
+           View / Download QR Code
         </button>
 
         {/* REAL DOCTOR CODE */}
