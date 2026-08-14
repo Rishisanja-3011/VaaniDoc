@@ -40,11 +40,21 @@ ALLOWED_TRANSITIONS = {
 }
 
 
-# Abandoned sessions are temporary and should not remain forever.
+# ============================================================
+# SESSION CONFIGURATION
+# ============================================================
+
 SESSION_TTL_MINUTES = 30
 
 
+# ============================================================
+# HELPERS
+# ============================================================
+
 def _first_row(response):
+    """
+    Safely return the first Supabase row.
+    """
     if not response.data:
         return None
 
@@ -52,6 +62,10 @@ def _first_row(response):
 
 
 def _session_response(session: dict) -> dict:
+    """
+    Convert a database session row into the API session format.
+    """
+
     return {
         "session_id": session["id"],
         "doctor_id": session["doctor_id"],
@@ -68,6 +82,10 @@ def _session_response(session: dict) -> dict:
 # ============================================================
 
 def create_session(doctor_id: str) -> dict:
+    """
+    Create a new temporary consultation session.
+    """
+
     expires_at = (
         datetime.now(timezone.utc)
         + timedelta(minutes=SESSION_TTL_MINUTES)
@@ -108,7 +126,13 @@ def create_session(doctor_id: str) -> dict:
 # GET SESSION
 # ============================================================
 
-def get_session(session_id: str) -> dict | None:
+def get_session(
+    session_id: str,
+) -> dict | None:
+    """
+    Get one consultation session by ID.
+    """
+
     response = (
         supabase_admin
         .table("active_sessions")
@@ -295,11 +319,39 @@ def save_patient_input(
     session_id: str,
     input_data: dict,
 ) -> dict | None:
+    """
+    Save patient input into temporary_inputs.
+
+    IMPORTANT DATABASE COMPATIBILITY:
+
+    The current Supabase temporary_inputs table has a
+    CHECK constraint on input_type which does not accept
+    "audio".
+
+    Audio is already transcribed by Gemini before this
+    function is called.
+
+    Therefore:
+        audio input -> stored as "text"
+        transcript -> stored in text_content
+        original audio filename/reference -> audio_reference
+
+    This allows the existing database schema to be used
+    without requiring a Supabase SQL migration.
+    """
+
+    # --------------------------------------------------------
+    # 1. Verify session exists
+    # --------------------------------------------------------
 
     session = get_session(session_id)
 
     if session is None:
         return None
+
+    # --------------------------------------------------------
+    # 2. Do not accept input for completed/cancelled sessions
+    # --------------------------------------------------------
 
     if session["status"] in {
         "completed",
@@ -307,29 +359,67 @@ def save_patient_input(
     }:
         return None
 
+    # --------------------------------------------------------
+    # 3. Read incoming input type
+    # --------------------------------------------------------
+
+    input_type = input_data.get(
+        "type",
+        "text",
+    )
+
+    # --------------------------------------------------------
+    # 4. DATABASE COMPATIBILITY FIX
+    #
+    # The database constraint rejects:
+    #
+    #     input_type = "audio"
+    #
+    # Gemini has already converted the audio into text,
+    # so save it as a text input.
+    # --------------------------------------------------------
+
+    if input_type == "audio":
+        database_input_type = "text"
+    else:
+        database_input_type = input_type
+
+    # --------------------------------------------------------
+    # 5. Prepare database payload
+    # --------------------------------------------------------
+
+    payload = {
+        "session_id": session_id,
+
+        "input_type": database_input_type,
+
+        "language": input_data.get(
+            "language"
+        ),
+
+        "text_content": input_data.get(
+            "text"
+        ),
+
+        "audio_reference": input_data.get(
+            "audio_reference"
+        ),
+    }
+
+    # --------------------------------------------------------
+    # 6. Save patient input
+    # --------------------------------------------------------
+
     response = (
         supabase_admin
         .table("temporary_inputs")
-        .insert(
-            {
-                "session_id": session_id,
-                "input_type": input_data.get(
-                    "type",
-                    "text",
-                ),
-                "language": input_data.get(
-                    "language"
-                ),
-                "text_content": input_data.get(
-                    "text"
-                ),
-                "audio_reference": input_data.get(
-                    "audio_reference"
-                ),
-            }
-        )
+        .insert(payload)
         .execute()
     )
+
+    # --------------------------------------------------------
+    # 7. Return saved row
+    # --------------------------------------------------------
 
     row = _first_row(response)
 
@@ -347,6 +437,9 @@ def save_intake(
     session_id: str,
     intake: dict,
 ) -> dict | None:
+    """
+    Save or update the temporary AI-generated clinical intake.
+    """
 
     session = get_session(session_id)
 
@@ -363,35 +456,45 @@ def save_intake(
 
     payload = {
         "session_id": session_id,
+
         "chief_complaint": english[
             "chief_complaint"
         ],
+
         "symptoms": english[
             "symptoms"
         ],
+
         "negative_symptoms": english[
             "negative_symptoms"
         ],
+
         "duration": english[
             "duration"
         ],
+
         "relevant_history": english[
             "relevant_history"
         ],
+
         "medications": english[
             "medications"
         ],
+
         "allergies": english[
             "allergies"
         ],
+
         "possible_symptom_categories": (
             intake[
                 "possible_symptom_categories"
             ]
         ),
+
         "urgency": intake[
             "urgency"
         ],
+
         "confidence": intake[
             "confidence"
         ],
@@ -417,6 +520,12 @@ def save_intake(
 def delete_session(
     session_id: str,
 ) -> bool:
+    """
+    Delete a consultation session.
+
+    Supabase foreign-key cascading should remove associated
+    temporary_inputs and temporary_intakes.
+    """
 
     response = (
         supabase_admin
@@ -429,22 +538,47 @@ def delete_session(
     return bool(response.data)
 
 
-def cleanup_expired_sessions(max_age_hours: int = 4) -> int:
+# ============================================================
+# CLEANUP EXPIRED SESSIONS
+# ============================================================
+
+def cleanup_expired_sessions(
+    max_age_hours: int = 4,
+) -> int:
     """
-    Deletes active_sessions older than max_age_hours (default 4 hours).
-    Cascading foreign keys in Supabase automatically delete temporary_inputs and temporary_intakes.
+    Delete expired active sessions.
+
+    The active_sessions.expires_at field is used as the
+    actual expiration timestamp.
+
+    Cascading foreign keys should remove:
+        - temporary_inputs
+        - temporary_intakes
     """
+
     try:
-        from datetime import datetime, timezone
-        cutoff = datetime.now(timezone.utc).isoformat()
+        cutoff = (
+            datetime.now(
+                timezone.utc
+            ).isoformat()
+        )
 
         response = (
             supabase_admin
             .table("active_sessions")
             .delete()
-            .lt("expires_at", cutoff)
+            .lt(
+                "expires_at",
+                cutoff,
+            )
             .execute()
         )
-        return len(response.data) if response.data else 0
+
+        return (
+            len(response.data)
+            if response.data
+            else 0
+        )
+
     except Exception:
         return 0

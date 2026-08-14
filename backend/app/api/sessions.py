@@ -1,10 +1,21 @@
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, File, UploadFile
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    status,
+    BackgroundTasks,
+    File,
+    UploadFile,
+)
+
 from pydantic import BaseModel, Field
 from postgrest.exceptions import APIError
 
 from app.core.auth import get_current_user
 from app.core.supabase import supabase_admin
+
 from app.services.session_service import (
     create_session,
     delete_session,
@@ -19,14 +30,28 @@ from app.services.session_service import (
 
 def _auto_process_session(session_id: str):
     """
-    Background task to execute session AI intake processing automatically upon receiving patient input.
+    Background task to execute session AI intake processing
+    automatically after receiving patient input.
     """
+
     try:
         from app.api.processing import process_session
-        asyncio.run(process_session(session_id))
+
+        asyncio.run(
+            process_session(session_id)
+        )
+
     except Exception as exc:
-        err_msg = str(exc).encode('ascii', 'backslashreplace').decode('ascii')
-        print(f"[BACKGROUND AI ERROR] Session {session_id}: {err_msg}")
+        err_msg = (
+            str(exc)
+            .encode("ascii", "backslashreplace")
+            .decode("ascii")
+        )
+
+        print(
+            f"[BACKGROUND AI ERROR] "
+            f"Session {session_id}: {err_msg}"
+        )
 
 
 router = APIRouter(
@@ -60,6 +85,7 @@ class PatientInputRequest(BaseModel):
         min_length=1,
         max_length=8000,
     )
+
     language: str = Field(
         min_length=2,
         max_length=10,
@@ -72,8 +98,8 @@ class PatientInputRequest(BaseModel):
 
 def get_doctor_id(user) -> str:
     """
-    Resolve authenticated Supabase user to the VaaniDoc
-    doctor profile.
+    Resolve authenticated Supabase user to the
+    VaaniDoc doctor profile.
     """
 
     try:
@@ -87,6 +113,12 @@ def get_doctor_id(user) -> str:
         )
 
     except APIError as exc:
+        print("================================")
+        print("DOCTOR PROFILE API ERROR")
+        print(type(exc).__name__)
+        print(str(exc))
+        print("================================")
+
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to access doctor profile.",
@@ -143,18 +175,25 @@ async def join_consultation_session(
     """
     Patient joins a doctor's consultation using the
     doctor's unique QR/code.
-
-    No doctor authentication is required.
     """
 
-    doctor_code = request.doctor_code.strip().upper()
+    doctor_code = (
+        request.doctor_code
+        .strip()
+        .upper()
+    )
 
     try:
         doctor_response = (
             supabase_admin
             .table("doctors")
-            .select("id, name, doctor_code")
-            .eq("doctor_code", doctor_code)
+            .select(
+                "id, name, doctor_code"
+            )
+            .eq(
+                "doctor_code",
+                doctor_code,
+            )
             .limit(1)
             .execute()
         )
@@ -201,7 +240,7 @@ async def join_consultation_session(
 
 
 # ============================================================
-# PATIENT SUBMITS INPUT
+# PATIENT TEXT INPUT
 # ============================================================
 
 @router.post(
@@ -213,11 +252,7 @@ async def submit_patient_input(
     background_tasks: BackgroundTasks,
 ):
     """
-    Patient submits temporary symptom information.
-
-    No doctor authentication is required.
-
-    The temporary session_id identifies the consultation.
+    Patient submits text symptoms.
     """
 
     session = get_session(session_id)
@@ -231,7 +266,10 @@ async def submit_patient_input(
     if session["status"] != "waiting":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Symptoms have already been submitted for this session.",
+            detail=(
+                "Symptoms have already been "
+                "submitted for this session."
+            ),
         )
 
     try:
@@ -250,9 +288,17 @@ async def submit_patient_input(
             )
 
     except APIError as exc:
+        print("================================")
+        print("SUPABASE TEXT INPUT SAVE ERROR")
+        print("TYPE:", type(exc).__name__)
+        print("ERROR:", str(exc))
+        print("================================")
+
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to save patient input.",
+            detail=(
+                f"Unable to save patient input: {exc}"
+            ),
         ) from exc
 
     except RuntimeError as exc:
@@ -261,14 +307,20 @@ async def submit_patient_input(
             detail=str(exc),
         ) from exc
 
-    # Automatically start AI processing in the background
-    background_tasks.add_task(_auto_process_session, session_id)
+    background_tasks.add_task(
+        _auto_process_session,
+        session_id,
+    )
 
     return {
         "session_id": session_id,
         "status": "received",
     }
 
+
+# ============================================================
+# PATIENT AUDIO INPUT
+# ============================================================
 
 @router.post(
     "/{session_id}/audio",
@@ -278,29 +330,98 @@ async def submit_patient_audio(
     background_tasks: BackgroundTasks,
     audio: UploadFile = File(...),
 ):
+    """
+    Receive patient voice recording.
+
+    Pipeline:
+
+        Browser microphone
+            ↓
+        MediaRecorder
+            ↓
+        multipart/form-data
+            ↓
+        Gemini transcription
+            ↓
+        save_patient_input()
+            ↓
+        background clinical extraction
+    """
+
+    print("")
+    print("========================================")
+    print("PATIENT AUDIO REQUEST")
+    print("========================================")
+    print("SESSION ID:", session_id)
+    print("FILENAME:", audio.filename)
+    print("CONTENT TYPE:", audio.content_type)
+
+    # --------------------------------------------------------
+    # SESSION
+    # --------------------------------------------------------
+
     session = get_session(session_id)
 
     if session is None:
+        print("SESSION NOT FOUND")
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session not found.",
         )
 
+    print(
+        "SESSION STATUS:",
+        session.get("status"),
+    )
+
     if session["status"] != "waiting":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Symptoms have already been submitted for this session.",
+            detail=(
+                "Symptoms have already been "
+                "submitted for this session."
+            ),
         )
 
-    mime_type = (audio.content_type or "").lower().split(";")[0].strip()
+    # --------------------------------------------------------
+    # MIME TYPE
+    # --------------------------------------------------------
+
+    mime_type = (
+        audio.content_type or ""
+    ).lower().split(";")[0].strip()
+
+    print(
+        "NORMALIZED MIME TYPE:",
+        mime_type,
+    )
 
     if mime_type not in SUPPORTED_AUDIO_MIME_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported audio format.",
+        print(
+            "UNSUPPORTED AUDIO FORMAT:",
+            mime_type,
         )
 
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Unsupported audio format: "
+                f"{mime_type}"
+            ),
+        )
+
+    # --------------------------------------------------------
+    # READ AUDIO
+    # --------------------------------------------------------
+
     audio_bytes = await audio.read()
+
+    print(
+        "AUDIO SIZE:",
+        len(audio_bytes),
+        "bytes",
+    )
 
     if not audio_bytes:
         raise HTTPException(
@@ -308,58 +429,215 @@ async def submit_patient_audio(
             detail="Audio recording is empty.",
         )
 
+    # --------------------------------------------------------
+    # GEMINI TRANSCRIPTION
+    # --------------------------------------------------------
+
     try:
         from app.services.ai_service import (
             AIProcessingError,
             transcribe_patient_audio,
         )
 
-        transcript_data = transcribe_patient_audio(
-            audio_bytes=audio_bytes,
-            mime_type=mime_type,
-        )
+        print("")
+        print("STARTING GEMINI TRANSCRIPTION...")
 
-        saved_input = save_patient_input(
-            session_id,
-            {
-                "type": "audio",
-                "text": transcript_data["transcript"],
-                "language": transcript_data["language"],
-                "audio_reference": audio.filename or "patient-audio",
-            },
-        )
-
-        if saved_input is None:
-            raise RuntimeError(
-                "Failed to save patient audio input."
+        transcript_data = (
+            transcribe_patient_audio(
+                audio_bytes=audio_bytes,
+                mime_type=mime_type,
             )
+        )
+
+        print("GEMINI TRANSCRIPTION SUCCESS")
+        print(
+            "DETECTED LANGUAGE:",
+            transcript_data.get(
+                "language"
+            ),
+        )
+        print(
+            "TRANSCRIPT:",
+            transcript_data.get(
+                "transcript"
+            ),
+        )
 
     except AIProcessingError as exc:
+        print("")
+        print("========================================")
+        print("GEMINI TRANSCRIPTION ERROR")
+        print("TYPE:", type(exc).__name__)
+        print("ERROR:", str(exc))
+        print("========================================")
+
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
         ) from exc
 
+    except Exception as exc:
+        print("")
+        print("========================================")
+        print("UNEXPECTED TRANSCRIPTION ERROR")
+        print("TYPE:", type(exc).__name__)
+        print("ERROR:", str(exc))
+        print("========================================")
+
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "Unable to transcribe patient audio: "
+                f"{exc}"
+            ),
+        ) from exc
+
+    # --------------------------------------------------------
+    # VALIDATE TRANSCRIPTION
+    # --------------------------------------------------------
+
+    transcript = (
+        transcript_data
+        .get("transcript", "")
+        .strip()
+    )
+
+    language = (
+        transcript_data
+        .get("language", "")
+        .strip()
+        .lower()
+    )
+
+    if not transcript:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "Gemini returned an empty "
+                "patient transcript."
+            ),
+        )
+
+    if not language:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "Gemini did not detect "
+                "the patient language."
+            ),
+        )
+
+    # --------------------------------------------------------
+    # SAVE PATIENT INPUT
+    # --------------------------------------------------------
+
+    try:
+        print("")
+        print(
+            "SAVING TRANSCRIBED INPUT "
+            "TO DATABASE..."
+        )
+
+        input_data = {
+            "type": "audio",
+            "text": transcript,
+            "language": language,
+            "audio_reference": (
+                audio.filename
+                or "patient-audio"
+            ),
+        }
+
+        print(
+            "INPUT DATA:",
+            input_data,
+        )
+
+        saved_input = save_patient_input(
+            session_id,
+            input_data,
+        )
+
+        print(
+            "SAVE RESULT:",
+            saved_input,
+        )
+
+        if saved_input is None:
+            raise RuntimeError(
+                "save_patient_input() "
+                "returned None."
+            )
+
     except APIError as exc:
+        print("")
+        print("========================================")
+        print("SUPABASE AUDIO SAVE ERROR")
+        print("TYPE:", type(exc).__name__)
+        print("ERROR:", str(exc))
+        print("========================================")
+
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to save patient audio input.",
+            detail=(
+                "Unable to save patient audio input: "
+                f"{exc}"
+            ),
         ) from exc
 
     except RuntimeError as exc:
+        print("")
+        print("========================================")
+        print("AUDIO SAVE RUNTIME ERROR")
+        print("ERROR:", str(exc))
+        print("========================================")
+
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
 
-    background_tasks.add_task(_auto_process_session, session_id)
+    except Exception as exc:
+        print("")
+        print("========================================")
+        print("UNEXPECTED AUDIO SAVE ERROR")
+        print("TYPE:", type(exc).__name__)
+        print("ERROR:", str(exc))
+        print("========================================")
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Unable to save patient audio input: "
+                f"{exc}"
+            ),
+        ) from exc
+
+    # --------------------------------------------------------
+    # BACKGROUND CLINICAL PROCESSING
+    # --------------------------------------------------------
+
+    print("")
+    print(
+        "STARTING BACKGROUND "
+        "CLINICAL PROCESSING..."
+    )
+
+    background_tasks.add_task(
+        _auto_process_session,
+        session_id,
+    )
+
+    print("AUDIO REQUEST SUCCESS")
+    print("========================================")
+    print("")
 
     return {
         "session_id": session_id,
         "status": "received",
-        "language": transcript_data["language"],
+        "language": language,
+        "transcript": transcript,
     }
-
 
 
 # ============================================================
@@ -373,15 +651,7 @@ async def get_patient_session_status(
     session_id: str,
 ):
     """
-    Patient-facing session status endpoint.
-
-    No doctor authentication is required.
-
-    The session UUID acts as the temporary capability
-    for the patient's active consultation.
-
-    This endpoint exposes ONLY session status.
-    It never exposes patient medical information.
+    Patient-facing session status.
     """
 
     session = get_session(session_id)
@@ -409,11 +679,7 @@ async def patient_cancel_session(
     session_id: str,
 ):
     """
-    Patient cancels their own temporary consultation.
-
-    No doctor authentication is required.
-
-    The session UUID identifies the temporary session.
+    Patient cancels temporary consultation.
     """
 
     session = get_session(session_id)
@@ -451,7 +717,9 @@ async def patient_cancel_session(
     except APIError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to cancel consultation session.",
+            detail=(
+                "Unable to cancel consultation session."
+            ),
         ) from exc
 
     except RuntimeError as exc:
@@ -485,9 +753,7 @@ async def create_consultation_session(
     user=Depends(get_current_user),
 ):
     """
-    Doctor can manually create a consultation session.
-
-    Patient-facing flow should normally use /sessions/join.
+    Doctor manually creates consultation session.
     """
 
     doctor_id = get_doctor_id(user)
@@ -500,7 +766,9 @@ async def create_consultation_session(
     except APIError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to create consultation session.",
+            detail=(
+                "Unable to create consultation session."
+            ),
         ) from exc
 
     except RuntimeError as exc:
@@ -512,8 +780,6 @@ async def create_consultation_session(
 
 # ============================================================
 # DOCTOR QUEUE
-# IMPORTANT:
-# THESE MUST COME BEFORE /{session_id}
 # ============================================================
 
 @router.get(
@@ -523,8 +789,8 @@ async def get_session_queue(
     user=Depends(get_current_user),
 ):
     """
-    Return active consultation sessions belonging
-    to the authenticated doctor.
+    Return active consultation sessions
+    belonging to authenticated doctor.
     """
 
     doctor_id = get_doctor_id(user)
@@ -556,7 +822,9 @@ async def get_session_queue(
         except APIError as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Unable to load patient information.",
+                detail=(
+                    "Unable to load patient information."
+                ),
             ) from exc
 
         patients.append(
@@ -565,17 +833,23 @@ async def get_session_queue(
                 "status": session["status"],
                 "created_at": session["created_at"],
                 "language": (
-                    patient_input.get("language")
+                    patient_input.get(
+                        "language"
+                    )
                     if patient_input
                     else None
                 ),
                 "complaint": (
-                    intake.get("chief_complaint")
+                    intake.get(
+                        "chief_complaint"
+                    )
                     if intake
                     else None
                 ),
                 "urgency": (
-                    intake.get("urgency")
+                    intake.get(
+                        "urgency"
+                    )
                     if intake
                     else None
                 ),
@@ -602,7 +876,7 @@ async def get_queue_patient(
 ):
     """
     Return complete temporary consultation information
-    for the authenticated doctor.
+    for authenticated doctor.
     """
 
     session = require_session_owner(
@@ -622,7 +896,9 @@ async def get_queue_patient(
     except APIError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to load patient information.",
+            detail=(
+                "Unable to load patient information."
+            ),
         ) from exc
 
     return {
@@ -633,7 +909,7 @@ async def get_queue_patient(
 
 
 # ============================================================
-# DOCTOR-ONLY SESSION ACCESS
+# DOCTOR SESSION
 # ============================================================
 
 @router.get(
@@ -644,8 +920,7 @@ async def get_consultation_session(
     user=Depends(get_current_user),
 ):
     """
-    Doctor can view their own consultation session
-    together with temporary patient input and AI intake.
+    Doctor views own consultation session.
     """
 
     session = require_session_owner(
@@ -665,7 +940,9 @@ async def get_consultation_session(
     except APIError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to load patient information.",
+            detail=(
+                "Unable to load patient information."
+            ),
         ) from exc
 
     return {
@@ -702,7 +979,7 @@ async def get_session_status(
 
 
 # ============================================================
-# DOCTOR START SESSION
+# DOCTOR START
 # ============================================================
 
 @router.post(
@@ -713,7 +990,7 @@ async def start_session(
     user=Depends(get_current_user),
 ):
     """
-    Doctor starts the consultation.
+    Doctor starts consultation.
     """
 
     session = require_session_owner(
@@ -739,7 +1016,9 @@ async def start_session(
     except APIError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to start consultation session.",
+            detail=(
+                "Unable to start consultation session."
+            ),
         ) from exc
 
     if updated_session is None:
@@ -755,7 +1034,7 @@ async def start_session(
 
 
 # ============================================================
-# DOCTOR COMPLETE SESSION
+# DOCTOR COMPLETE
 # ============================================================
 
 @router.post(
@@ -766,10 +1045,8 @@ async def complete_session(
     user=Depends(get_current_user),
 ):
     """
-    Doctor completes consultation.
-
-    The session and dependent temporary patient data
-    are deleted.
+    Doctor completes consultation and deletes
+    temporary session data.
     """
 
     session = require_session_owner(
@@ -804,7 +1081,9 @@ async def complete_session(
     except APIError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to complete consultation session.",
+            detail=(
+                "Unable to complete consultation session."
+            ),
         ) from exc
 
     except RuntimeError as exc:
@@ -827,7 +1106,7 @@ async def complete_session(
 
 
 # ============================================================
-# DOCTOR CANCEL SESSION
+# DOCTOR CANCEL
 # ============================================================
 
 @router.post(
@@ -838,9 +1117,8 @@ async def cancel_session(
     user=Depends(get_current_user),
 ):
     """
-    Doctor cancels consultation.
-
-    Cancelled sessions are deleted immediately.
+    Doctor cancels consultation and deletes
+    temporary session data.
     """
 
     session = require_session_owner(
@@ -875,7 +1153,9 @@ async def cancel_session(
     except APIError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to cancel consultation session.",
+            detail=(
+                "Unable to cancel consultation session."
+            ),
         ) from exc
 
     except RuntimeError as exc:
