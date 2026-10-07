@@ -1,4 +1,5 @@
 import { apiFetch } from './api.js'
+import { normalizeLanguage } from './language.js'
 
 
 // ============================================================
@@ -115,7 +116,7 @@ export async function submitTextInput(
         text:
           text.trim(),
         language:
-          language || 'en',
+          normalizeLanguage(language),
       }),
     }
   )
@@ -139,7 +140,9 @@ export async function submitTextInput(
 
 export async function submitAudioInput(
   sessionId,
-  audioBlob
+  audioBlob,
+  language,
+  transcript,
 ) {
   if (!sessionId) {
     throw new Error(
@@ -169,14 +172,23 @@ export async function submitAudioInput(
   form.append(
     'audio',
     audioBlob,
-    'recording.webm'
+    `recording.${audioBlob.type?.includes('mp4') ? 'mp4' : 'webm'}`
   )
+
+  if (language) {
+    form.append('language', normalizeLanguage(language))
+  }
+
+  if (transcript?.trim()) {
+    form.append('transcript', transcript.trim())
+  }
 
   return apiFetch(
     `/sessions/${sessionId}/audio`,
     {
       method: 'POST',
       body: form,
+      timeoutMs: 90_000,
     }
   )
 }

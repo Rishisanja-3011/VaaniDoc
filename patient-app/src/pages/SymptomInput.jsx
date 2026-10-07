@@ -6,6 +6,10 @@ import {
   getSavedPatientSession,
   savePatientSession,
 } from '../services/sessionService.js'
+import {
+  languageToLocale,
+  normalizeLanguage,
+} from '../services/language.js'
 
 const LANGUAGES = [
   { code: 'gu', label: '\u0a97\u0ac1\u0a9c\u0ab0\u0abe\u0aa4\u0ac0', english: 'Gujarati' },
@@ -44,7 +48,10 @@ export default function SymptomInput() {
     ''
 
   const [tab, setTab] = useState('text')
-  const [language, setLanguage] = useState('hi')
+  const [language, setLanguage] = useState(() => normalizeLanguage(
+    routeState?.language || restoredSession?.reviewData?.language,
+    'hi',
+  ))
   const [text, setText] = useState('')
   const [textError, setTextError] = useState('')
   const [recState, setRecState] = useState('idle')
@@ -57,6 +64,7 @@ export default function SymptomInput() {
   const recognitionRef = useRef(null)
   const chunksRef = useRef([])
   const timerRef = useRef(null)
+  const discardRecordingRef = useRef(false)
 
   useEffect(() => {
     if (!sessionId) {
@@ -71,6 +79,15 @@ export default function SymptomInput() {
       doctorName,
     })
   }, [doctorCode, doctorName, navigate, sessionId])
+
+  useEffect(() => () => {
+    clearInterval(timerRef.current)
+    discardRecordingRef.current = true
+    recognitionRef.current?.abort()
+    if (mediaRecorderRef.current?.state !== 'inactive') {
+      mediaRecorderRef.current?.stop()
+    }
+  }, [])
 
   if (!sessionId) {
     return null
@@ -110,18 +127,18 @@ export default function SymptomInput() {
     setDuration(0)
     setTranscript('')
     chunksRef.current = []
+    discardRecordingRef.current = false
 
     try {
-      const SpeechRecognition =
-        window.SpeechRecognition ||
-        window.webkitSpeechRecognition
-
-      if (!SpeechRecognition) {
-        throw new Error('SpeechRecognitionUnavailable')
-      }
-
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mediaRecorder = new MediaRecorder(stream)
+      const mimeType = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+      ].find((type) => window.MediaRecorder?.isTypeSupported?.(type))
+      const mediaRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream)
       mediaRecorderRef.current = mediaRecorder
 
       mediaRecorder.ondataavailable = (event) => {
@@ -132,6 +149,10 @@ export default function SymptomInput() {
 
       mediaRecorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop())
+        if (discardRecordingRef.current) {
+          discardRecordingRef.current = false
+          return
+        }
         const blob = new Blob(chunksRef.current, {
           type: mediaRecorder.mimeType || 'audio/webm',
         })
@@ -141,32 +162,41 @@ export default function SymptomInput() {
 
       mediaRecorder.start(250)
 
-      const recognition = new SpeechRecognition()
-      recognition.lang = 'en-IN'
-      recognition.continuous = true
-      recognition.interimResults = true
-      recognition.onresult = (event) => {
-        let nextTranscript = ''
-        for (let index = 0; index < event.results.length; index += 1) {
-          nextTranscript += event.results[index][0].transcript
+      const SpeechRecognition =
+        window.SpeechRecognition ||
+        window.webkitSpeechRecognition
+
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition()
+        recognition.lang = languageToLocale(language)
+        recognition.continuous = true
+        recognition.interimResults = true
+        recognition.onresult = (event) => {
+          let nextTranscript = ''
+          for (let index = 0; index < event.results.length; index += 1) {
+            nextTranscript += event.results[index][0].transcript
+          }
+          setTranscript(nextTranscript.trim())
         }
-        setTranscript(nextTranscript.trim())
-      }
-      recognition.onerror = (event) => {
-        if (event.error !== 'aborted' && event.error !== 'no-speech') {
-          setRecError('Voice transcription was interrupted. Please try again or type your symptoms.')
+        recognition.onerror = (event) => {
+          if (event.error !== 'aborted' && event.error !== 'no-speech') {
+            setRecError('Voice transcription was interrupted. Please try again or type your symptoms.')
+          }
         }
+        recognitionRef.current = recognition
+        recognition.start()
       }
-      recognitionRef.current = recognition
-      recognition.start()
       setRecState('recording')
       timerRef.current = setInterval(() => setDuration((value) => value + 1), 1000)
     } catch (err) {
+      discardRecordingRef.current = true
+      if (mediaRecorderRef.current?.state !== 'inactive') {
+        mediaRecorderRef.current.stop()
+      }
+      mediaRecorderRef.current = null
       const msg = String(err)
 
-      if (msg.includes('SpeechRecognitionUnavailable')) {
-        setRecError('Voice-to-text is available in recent Chrome and Edge browsers. Please type your symptoms on this browser.')
-      } else if (msg.includes('Permission') || msg.includes('NotAllowed')) {
+      if (msg.includes('Permission') || msg.includes('NotAllowed')) {
         setRecError('Microphone permission denied. Please allow microphone access and try again.')
       } else if (msg.includes('NotFound')) {
         setRecError('No microphone found on this device.')
@@ -187,6 +217,7 @@ export default function SymptomInput() {
   function resetRecording() {
     clearInterval(timerRef.current)
     const mediaRecorder = mediaRecorderRef.current
+    discardRecordingRef.current = true
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       mediaRecorder.stop()
     }
@@ -259,23 +290,24 @@ export default function SymptomInput() {
         </button>
       </div>
 
+      <div style={s.langRow}>
+        <span style={s.langLabel}>Language:</span>
+        <select
+          style={s.langSelect}
+          value={language}
+          disabled={recState === 'recording'}
+          onChange={(event) => setLanguage(normalizeLanguage(event.target.value, 'hi'))}
+        >
+          {LANGUAGES.map((item) => (
+            <option key={item.code} value={item.code}>
+              {item.english} - {item.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {tab === 'text' && (
         <div style={s.tabPanel}>
-          <div style={s.langRow}>
-            <span style={s.langLabel}>Language:</span>
-            <select
-              style={s.langSelect}
-              value={language}
-              onChange={(event) => setLanguage(event.target.value)}
-            >
-              {LANGUAGES.map((item) => (
-                <option key={item.code} value={item.code}>
-                  {item.english} - {item.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
           <textarea
             style={{ ...s.textarea, ...(textError ? s.textareaError : {}) }}
             placeholder={`Describe your symptoms in ${selectedLang.english} (${selectedLang.label})...\n\nFor example: "I have a headache and fever since yesterday."`}
@@ -298,7 +330,7 @@ export default function SymptomInput() {
         <div style={s.tabPanel}>
           {recState === 'idle' && (
             <div style={s.voiceCenter}>
-              <p style={s.voiceHint}>Tap the microphone and speak your symptoms. VaaniDoc will detect the language automatically.</p>
+              <p style={s.voiceHint}>Tap the microphone and speak your symptoms in the selected language.</p>
               <button style={s.micBtn} onClick={startRecording}>
                 <Mic size={32} color="#fff" />
               </button>
@@ -330,7 +362,7 @@ export default function SymptomInput() {
                 <Mic size={22} color="var(--accent)" />
                 <div>
                   <p style={s.doneTitle}>Recording ready</p>
-                  <p style={s.doneMeta}>{formatDuration(duration)} - language will be detected automatically</p>
+                  <p style={s.doneMeta}>{formatDuration(duration)} - recorded in the selected language</p>
                 </div>
               </div>
               {transcript && <p style={s.transcript}>"{transcript}"</p>}
