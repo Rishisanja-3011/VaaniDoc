@@ -8,6 +8,8 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field, ValidationError
 
+from app.services.language import normalize_language
+
 
 # ============================================================
 # ENVIRONMENT
@@ -26,10 +28,8 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 # GEMINI CONFIGURATION
 # ============================================================
 
-# Your API key currently exposes this model.
-# Do NOT use gemini-2.5-flash because your previous API response
-# explicitly reported that it is unavailable for your account.
-MODEL_NAME = "gemini-3.6-flash"
+# Keep the model configurable through the environment.
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
 
 class AIProcessingError(Exception):
@@ -73,6 +73,7 @@ class AudioTranscription(BaseModel):
 # ============================================================
 # CLINICAL SYSTEM PROMPT
 # ============================================================
+
 
 SYSTEM_PROMPT = """
 You are VaaniDoc, a multilingual clinical intake extraction assistant.
@@ -132,320 +133,267 @@ def generate_demo_fallback_intake(
     language: str,
 ) -> dict:
     """
-    Safe fallback and robust mock extractor used when Gemini clinical processing fails
-    or when GEMINI_API_KEY is not configured or is a placeholder.
+    Safe fallback extractor used when Gemini clinical processing fails
+    or when GEMINI_API_KEY is not configured.
 
-    This does NOT attempt to diagnose the patient.
+    This fallback is intentionally conservative. It extracts only a
+    small set of explicitly stated symptoms, duration, medication,
+    allergy, and urgency signals. It does not diagnose the patient.
     """
 
     clean_text = (text or "").strip()
     lower_text = clean_text.lower()
 
-    if "पेट में दर्द" in clean_text or "પેટમાં દુખાવો" in clean_text or "पोटात दुखत" in clean_text or "stomach pain" in lower_text:
-        symptoms = ["stomach pain"]
-        if "मितली" in clean_text or "nausea" in lower_text:
-            symptoms.append("nausea")
-        duration = ""
-        if "दो दिन" in clean_text or "બે દિવસ" in clean_text or "दोन दिवसां" in clean_text or "two days" in lower_text or "two days." in lower_text:
-            duration = "two days" if language == "en" else "2 days"
-        return {
-            "language": language or "gu",
-            "english_intake": {
-                "chief_complaint": clean_text if language == "en" else ("Stomach pain and nausea" if len(symptoms) > 1 else "Stomach pain"),
-                "symptoms": symptoms,
-                "negative_symptoms": [],
-                "duration": duration,
-                "relevant_history": [],
-                "medications": [],
-                "allergies": [],
-            },
-            "possible_symptom_categories": ["Gastrointestinal"],
-            "urgency": "moderate",
-            "confidence": {"symptoms": 0.95, "category": 0.9, "urgency": 0.85},
-        }
+    def has(*values: str) -> bool:
+        return any(
+            value.lower() in lower_text
+            for value in values
+        )
 
-    if "માથાનો દુખાવો" in clean_text or "mild headache" in lower_text or ("headache" in lower_text and "paracetamol" not in lower_text and "two days" not in lower_text and "four days" not in lower_text):
-        neg = ["fever"] if ("તાવ નથી" in clean_text or "no fever" in lower_text) else []
-        urg = "low"
-        return {
-            "language": language or "gu",
-            "english_intake": {
-                "chief_complaint": "Headache" if "headache" in lower_text else clean_text,
-                "symptoms": ["headache"],
-                "negative_symptoms": neg,
-                "duration": "",
-                "relevant_history": [],
-                "medications": [],
-                "allergies": [],
-            },
-            "possible_symptom_categories": ["Neurological"],
-            "urgency": urg,
-            "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
-        }
+    symptoms: list[str] = []
 
-    if "માથામાં દુખાવો" in clean_text and "paracetamol" in lower_text:
-        return {
-            "language": language or "en",
-            "english_intake": {
-                "chief_complaint": "Headache",
-                "symptoms": ["headache"],
-                "negative_symptoms": [],
-                "duration": "",
-                "relevant_history": [],
-                "medications": ["paracetamol"],
-                "allergies": [],
-            },
-            "possible_symptom_categories": ["Neurological"],
-            "urgency": "low",
-            "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
-        }
+    symptom_patterns = {
+        "stomach pain": (
+            "stomach pain",
+            "પેટમાં દુખાવો",
+            "પેટમાં દુખાવું",
+            "पेट में दर्द",
+            "पोटात दुखत",
+            "पोटात दुखणे",
+        ),
+        "headache": (
+            "headache",
+            "માથાનો દુખાવો",
+            "માથામાં દુખાવો",
+            "माथे में दर्द",
+            "सिर में दर्द",
+            "डोकेदुखी",
+            "डोक्यात दुखत",
+        ),
+        "fever": (
+            "fever",
+            "તાવ",
+            "બુખાર",
+            "बुखार",
+            "ताप",
+        ),
+        "cough": (
+            "cough",
+            "ઉધરસ",
+            "ખાંસી",
+            "खांसी",
+            "खोकला",
+        ),
+        "sore throat": (
+            "sore throat",
+            "ગળામાં દુખાવો",
+            "ગળું દુખે",
+            "गले में दर्द",
+            "घसा दुखतो",
+        ),
+        "difficulty breathing": (
+            "difficulty breathing",
+            "breathing difficulty",
+            "શ્વાસ લેવામાં તકલીફ",
+            "શ્વાસ લેવામાં મુશ્કેલી",
+            "સાંસ લેવામાં તકલીફ",
+            "सांस लेने में परेशानी",
+            "श्वास घेण्यास त्रास",
+        ),
+        "chest pain": (
+            "chest pain",
+            "છાતીમાં દુખાવો",
+            "છાતીમાં ખૂબ જ દુખાવો",
+            "छाती में दर्द",
+            "छाती में बहुत दर्द",
+            "छातीत दुखत",
+        ),
+        "leg pain": (
+            "leg pain",
+            "પગમાં દુખાવો",
+            "પગ દુખે",
+            "पैर में दर्द",
+            "पायात दुखत",
+        ),
+        "rash": (
+            "rash",
+            "ચામડી પર ચકામા",
+            "ચકામા",
+            "चकत्ते",
+            "पुरळ",
+        ),
+        "nausea": (
+            "nausea",
+            "મિતલી",
+            "ઉબકા",
+            "मितली",
+            "मळमळ",
+        ),
+    }
 
-    if "તાવ છે, ગળામાં દુखાવો છે અને ઉધરસ" in clean_text or "તાવ છે, ગળામાં દુખાવો છે અને ઉધરસ" in clean_text or ("fever" in lower_text and "cough" in lower_text and "sore throat" in lower_text):
-        duration = "3 days" if ("ત્રણ દિવસ" in clean_text or "three days" in lower_text) else ("four days" if "four days" in lower_text else "")
-        return {
-            "language": language or "gu",
-            "english_intake": {
-                "chief_complaint": "Persistent cough, mild fever and sore throat" if "four days" in lower_text else "Fever, sore throat, cough",
-                "symptoms": ["fever", "sore throat", "cough"] if "four days" not in lower_text else ["cough", "fever", "sore throat"],
-                "negative_symptoms": [],
-                "duration": duration,
-                "relevant_history": [],
-                "medications": [],
-                "allergies": [],
-            },
-            "possible_symptom_categories": ["Respiratory"],
-            "urgency": "moderate",
-            "confidence": {"symptoms": 0.95, "category": 0.9, "urgency": 0.85},
-        }
+    for symptom, patterns in symptom_patterns.items():
+        if has(*patterns):
+            symptoms.append(symptom)
 
-    if "છાતીમાં ખૂબ જ દુખાવો" in clean_text or "chest pain" in lower_text:
-        return {
-            "language": language or "gu",
-            "english_intake": {
-                "chief_complaint": "Chest pain and difficulty breathing",
-                "symptoms": ["chest pain", "difficulty breathing"],
-                "negative_symptoms": [],
-                "duration": "acute",
-                "relevant_history": [],
-                "medications": [],
-                "allergies": [],
-            },
-            "possible_symptom_categories": ["Cardiovascular"],
-            "urgency": "high",
-            "confidence": {"symptoms": 0.95, "category": 0.95, "urgency": 0.95},
-        }
+    negative_symptoms: list[str] = []
 
-    if "પાંચ દિવસથી ઉધરસ" in clean_text or ("cough" in lower_text and "5 days" in lower_text) or "પાંચ" in clean_text:
-        return {
-            "language": language or "gu",
-            "english_intake": {
-                "chief_complaint": "Cough",
-                "symptoms": ["cough"],
-                "negative_symptoms": [],
-                "duration": "5 days",
-                "relevant_history": [],
-                "medications": [],
-                "allergies": [],
-            },
-            "possible_symptom_categories": ["Respiratory"],
-            "urgency": "moderate",
-            "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
-        }
+    if has(
+        "no fever",
+        "without fever",
+        "તાવ નથી",
+        "બુખાર નથી",
+        "बुखार नहीं",
+        "बुखार नही",
+        "ताप नाही",
+    ):
+        negative_symptoms.append("fever")
+        symptoms = [
+            symptom
+            for symptom in symptoms
+            if symptom != "fever"
+        ]
 
-    if "बुखार है" in clean_text or "कल से" in clean_text:
-        return {
-            "language": language or "hi",
-            "english_intake": {
-                "chief_complaint": "Fever",
-                "symptoms": ["fever"],
-                "negative_symptoms": [],
-                "duration": "since yesterday",
-                "relevant_history": [],
-                "medications": [],
-                "allergies": [],
-            },
-            "possible_symptom_categories": ["General/Systemic"],
-            "urgency": "moderate",
-            "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
-        }
+    if has(
+        "mild",
+        "mild pain",
+        "હળવો",
+        "હળવો દુખાવો",
+        "हल्का",
+        "हल्का दर्द",
+        "सौम्य",
+    ):
+        urgency = "low"
+    elif any(
+        symptom in symptoms
+        for symptom in (
+            "chest pain",
+            "difficulty breathing",
+        )
+    ):
+        urgency = "high"
+    else:
+        urgency = "moderate"
 
-    if "खोकला आहे" in clean_text or ("cough" in lower_text and "3 days" in lower_text and "mal" in lower_text):
-        return {
-            "language": language or "mr",
-            "english_intake": {
-                "chief_complaint": "Cough",
-                "symptoms": ["cough"],
-                "negative_symptoms": [],
-                "duration": "3 days",
-                "relevant_history": [],
-                "medications": [],
-                "allergies": [],
-            },
-            "possible_symptom_categories": ["Respiratory"],
-            "urgency": "moderate",
-            "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
-        }
+    duration = ""
 
-    if "paracetamol" in lower_text:
-        return {
-            "language": language or "en",
-            "english_intake": {
-                "chief_complaint": "Headache",
-                "symptoms": ["headache"],
-                "negative_symptoms": [],
-                "duration": "",
-                "relevant_history": [],
-                "medications": ["paracetamol"],
-                "allergies": [],
-            },
-            "possible_symptom_categories": ["Neurological"],
-            "urgency": "low",
-            "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
-        }
+    if has(
+        "two days",
+        "2 days",
+        "બે દિવસ",
+        "दो दिन",
+        "दोन दिवस",
+        "दोन दिवसां",
+    ):
+        duration = "two days" if language == "en" else "2 days"
 
-    if "penicillin" in lower_text or "rash" in lower_text:
-        return {
-            "language": language or "en",
-            "english_intake": {
-                "chief_complaint": "Rash",
-                "symptoms": ["rash"],
-                "negative_symptoms": [],
-                "duration": "",
-                "relevant_history": [],
-                "medications": [],
-                "allergies": ["penicillin"],
-            },
-            "possible_symptom_categories": ["Dermatological"],
-            "urgency": "moderate",
-            "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
-        }
+    elif has(
+        "three days",
+        "3 days",
+        "ત્રણ દિવસ",
+        "तीन दिन",
+        "तीन दिवस",
+    ):
+        duration = "three days" if language == "en" else "3 days"
 
-    if "खांसी और सांस लेने में परेशानी" in clean_text or "difficulty breathing" in lower_text:
-        return {
-            "language": language or "hi",
-            "english_intake": {
-                "chief_complaint": "Cough and difficulty breathing",
-                "symptoms": ["cough", "difficulty breathing"],
-                "negative_symptoms": [],
-                "duration": "",
-                "relevant_history": [],
-                "medications": [],
-                "allergies": [],
-            },
-            "possible_symptom_categories": ["Respiratory"],
-            "urgency": "high",
-            "confidence": {"symptoms": 0.95, "category": 0.9, "urgency": 0.9},
-        }
+    elif has(
+        "four days",
+        "4 days",
+        "ચાર દિવસ",
+        "चार दिन",
+        "चार दिवस",
+    ):
+        duration = "four days" if language == "en" else "4 days"
 
-    if "પગમાં દુખાવો" in clean_text or "leg pain" in lower_text:
-        return {
-            "language": language or "gu",
-            "english_intake": {
-                "chief_complaint": "Leg pain",
-                "symptoms": ["leg pain"],
-                "negative_symptoms": [],
-                "duration": "",
-                "relevant_history": [],
-                "medications": [],
-                "allergies": [],
-            },
-            "possible_symptom_categories": ["Musculoskeletal"],
-            "urgency": "low",
-            "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
-        }
+    elif has(
+        "five days",
+        "5 days",
+        "પાંચ દિવસ",
+        "पांच दिन",
+        "पाच दिवस",
+    ):
+        duration = "five days" if language == "en" else "5 days"
 
-    if "cough but no fever" in lower_text or "no fever" in lower_text:
-        return {
-            "language": language or "en",
-            "english_intake": {
-                "chief_complaint": "Cough",
-                "symptoms": ["cough"],
-                "negative_symptoms": ["fever"],
-                "duration": "",
-                "relevant_history": [],
-                "medications": [],
-                "allergies": [],
-            },
-            "possible_symptom_categories": ["Respiratory"],
-            "urgency": "low",
-            "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
-        }
+    elif has(
+        "one day",
+        "1 day",
+        "એક દિવસ",
+        "एक दिन",
+        "एक दिवस",
+    ):
+        duration = "one day" if language == "en" else "1 day"
 
-    if "stomach pain for two days" in lower_text or "stomach pain for two days" in lower_text:
-        return {
-            "language": language or "en",
-            "english_intake": {
-                "chief_complaint": "Stomach pain",
-                "symptoms": ["stomach pain"],
-                "negative_symptoms": [],
-                "duration": "two days",
-                "relevant_history": [],
-                "medications": [],
-                "allergies": [],
-            },
-            "possible_symptom_categories": ["Gastrointestinal"],
-            "urgency": "moderate",
-            "confidence": {"symptoms": 0.95, "category": 0.9, "urgency": 0.85},
-        }
+    elif has(
+        "since yesterday",
+        "yesterday",
+        "કલથી",
+        "ગઈકાલથી",
+        "कल से",
+        "कालपासून",
+    ):
+        duration = "since yesterday"
 
-    if "stomach pain" in lower_text and "two days" in lower_text:
-        return {
-            "language": language or "en",
-            "english_intake": {
-                "chief_complaint": "Stomach pain",
-                "symptoms": ["stomach pain"],
-                "negative_symptoms": [],
-                "duration": "two days",
-                "relevant_history": [],
-                "medications": [],
-                "allergies": [],
-            },
-            "possible_symptom_categories": ["Gastrointestinal"],
-            "urgency": "moderate",
-            "confidence": {"symptoms": 0.95, "category": 0.9, "urgency": 0.85},
-        }
+    medications = ["paracetamol"] if has("paracetamol") else []
+    allergies = ["penicillin"] if has("penicillin") else []
 
-    if "stomach pain." in lower_text and "two days" not in lower_text:
-        return {
-            "language": language or "en",
-            "english_intake": {
-                "chief_complaint": "Stomach pain",
-                "symptoms": ["stomach pain"],
-                "negative_symptoms": [],
-                "duration": "",
-                "relevant_history": [],
-                "medications": [],
-                "allergies": [],
-            },
-            "possible_symptom_categories": ["Gastrointestinal"],
-            "urgency": "moderate",
-            "confidence": {"symptoms": 0.9, "category": 0.85, "urgency": 0.8},
-        }
+    if not symptoms:
+        symptoms = [clean_text] if clean_text else []
 
-    symptoms = []
-    if "cough" in lower_text: symptoms.append("cough")
-    if "fever" in lower_text: symptoms.append("fever")
-    if "headache" in lower_text: symptoms.append("headache")
-    if "stomach" in lower_text: symptoms.append("stomach pain")
-    if "pain" in lower_text and not symptoms: symptoms.append("pain")
+    if "chest pain" in symptoms:
+        category = "Cardiovascular"
+
+    elif any(
+        symptom in symptoms
+        for symptom in (
+            "cough",
+            "sore throat",
+            "difficulty breathing",
+        )
+    ):
+        category = "Respiratory"
+
+    elif "headache" in symptoms:
+        category = "Neurological"
+
+    elif any(
+        symptom in symptoms
+        for symptom in (
+            "stomach pain",
+            "nausea",
+        )
+    ):
+        category = "Gastrointestinal"
+
+    elif "leg pain" in symptoms:
+        category = "Musculoskeletal"
+
+    elif "rash" in symptoms:
+        category = "Dermatological"
+
+    else:
+        category = "General/Systemic"
+
+    if symptoms:
+        chief_complaint = ", ".join(symptoms).capitalize()
+    else:
+        chief_complaint = clean_text
 
     return {
         "language": language or "en",
         "english_intake": {
-            "chief_complaint": clean_text,
-            "symptoms": symptoms if symptoms else [clean_text],
-            "negative_symptoms": [],
-            "duration": "",
+            "chief_complaint": chief_complaint,
+            "symptoms": symptoms,
+            "negative_symptoms": negative_symptoms,
+            "duration": duration,
             "relevant_history": [],
-            "medications": [],
-            "allergies": [],
+            "medications": medications,
+            "allergies": allergies,
         },
-        "possible_symptom_categories": ["General/Systemic"],
-        "urgency": "moderate",
+        "possible_symptom_categories": [category],
+        "urgency": urgency,
         "confidence": {
-            "symptoms": 0.5,
-            "category": 0.4,
-            "urgency": 0.4,
+            "symptoms": 0.85,
+            "category": 0.8,
+            "urgency": 0.8,
         },
     }
 
@@ -470,6 +418,16 @@ def process_patient_text(
             "Patient language cannot be empty."
         )
 
+    language = normalize_language(
+        language,
+        fallback=None,
+    )
+
+    if language is None:
+        raise ValueError(
+            "Patient language is not supported."
+        )
+
     api_key = os.getenv("GEMINI_API_KEY")
 
     if not api_key:
@@ -485,9 +443,11 @@ def process_patient_text(
 
         patient_prompt = f"""
 Patient language:
+
 {language}
 
 Patient input:
+
 {text}
 
 Understand the patient's message in its original language.
@@ -513,8 +473,9 @@ IMPORTANT:
             ],
             config={
                 "response_mime_type": "application/json",
-                "response_json_schema":
-                    ClinicalIntake.model_json_schema(),
+                "response_json_schema": (
+                    ClinicalIntake.model_json_schema()
+                ),
                 "temperature": 0,
             },
         )
@@ -559,14 +520,17 @@ IMPORTANT:
 def transcribe_patient_audio(
     audio_bytes: bytes,
     mime_type: str,
+    preferred_language: str | None = None,
 ) -> dict:
     """
     Transcribe patient browser audio.
 
     The browser currently sends:
+
         audio/webm;codecs=opus
 
     The API normalizes that to:
+
         audio/webm
 
     Gemini receives the uploaded audio file and is instructed
@@ -601,6 +565,11 @@ def transcribe_patient_audio(
     # API KEY
     # --------------------------------------------------------
 
+    preferred_language = normalize_language(
+        preferred_language,
+        fallback=None,
+    )
+
     api_key = os.getenv("GEMINI_API_KEY")
 
     if not api_key:
@@ -631,6 +600,7 @@ def transcribe_patient_audio(
 
     temp_path = None
     uploaded_file = None
+    client = None
 
     try:
         # ----------------------------------------------------
@@ -703,7 +673,15 @@ def transcribe_patient_audio(
         # is allowed to return plain text containing JSON.
         # ----------------------------------------------------
 
-        transcription_prompt = """
+        preferred_language_instruction = (
+            f"The selected patient language is {preferred_language}. "
+            "Use that language as the primary language unless the audio "
+            "is clearly different."
+            if preferred_language
+            else "Detect the primary spoken language from the audio."
+        )
+
+        transcription_prompt = f"""
 You are the VaaniDoc patient voice transcription engine.
 
 LISTEN TO THE ATTACHED AUDIO VERY CAREFULLY.
@@ -723,9 +701,10 @@ Do NOT invent words.
 Do NOT return an empty transcript if understandable speech
 is present.
 
-Detect the primary language automatically.
+{preferred_language_instruction}
 
 The patient may speak:
+
 - English
 - Hindi
 - Gujarati
@@ -743,34 +722,38 @@ Return ONLY valid JSON.
 
 Use exactly this structure:
 
-{
-  "language": "en",
-  "transcript": "I have a headache"
-}
+{{
+    "language": "en",
+    "transcript": "I have a headache"
+}}
 
 Language must be a short lowercase code.
 
 Examples:
 
 English:
-{
-  "language": "en",
-  "transcript": "I have a headache"
-}
+
+{{
+    "language": "en",
+    "transcript": "I have a headache"
+}}
 
 Hindi:
-{
-  "language": "hi",
-  "transcript": "मेरा सिर दर्द कर रहा है"
-}
+
+{{
+    "language": "hi",
+    "transcript": "मेरा सिर दर्द कर रहा है"
+}}
 
 Gujarati:
-{
-  "language": "gu",
-  "transcript": "મને માથામાં દુખાવો થાય છે"
-}
+
+{{
+    "language": "gu",
+    "transcript": "મને માથામાં દુખાવો થાય છે"
+}}
 
 IMPORTANT:
+
 If the recording contains clear human speech, the transcript
 must not be empty.
 """
@@ -798,11 +781,6 @@ must not be empty.
             getattr(response, "text", None)
             or ""
         ).strip()
-
-        print("")
-        print("GEMINI RAW RESPONSE:")
-        print(repr(raw_text))
-        print("========================================")
 
         if not raw_text:
             raise AIProcessingError(
@@ -838,11 +816,6 @@ must not be empty.
 
             print(
                 "GEMINI DID NOT RETURN JSON."
-            )
-
-            print(
-                "RAW RESPONSE:",
-                repr(raw_text),
             )
 
             # ------------------------------------------------
@@ -908,15 +881,19 @@ must not be empty.
                 "Make sure the recording contains clear speech."
             )
 
+        language = normalize_language(
+            preferred_language or language,
+            fallback=None,
+        )
+
         if not language:
-            # Don't reject a valid transcript only because
-            # language detection failed.
-            language = "unknown"
+            raise AIProcessingError(
+                "Gemini did not return a supported patient language."
+            )
 
         print("")
-        print("✅ GEMINI TRANSCRIPTION SUCCESS")
+        print("GEMINI TRANSCRIPTION SUCCESS")
         print("LANGUAGE:", language)
-        print("TRANSCRIPT:", transcript)
         print("========================================")
 
         return {
@@ -943,7 +920,7 @@ must not be empty.
     except Exception as exc:
 
         print("")
-        print("❌ GEMINI AUDIO ERROR")
+        print("GEMINI AUDIO ERROR")
         print("ERROR TYPE:", type(exc).__name__)
         print("ERROR:", str(exc))
         print("========================================")
@@ -958,7 +935,7 @@ must not be empty.
 
     finally:
 
-        if uploaded_file is not None:
+        if uploaded_file is not None and client is not None:
             try:
                 client.files.delete(
                     name=uploaded_file.name

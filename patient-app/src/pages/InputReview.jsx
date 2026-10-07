@@ -85,10 +85,7 @@ export default function InputReview() {
     doctorName,
   } = state ?? {}
 
-  const langName =
-    type === 'voice'
-      ? 'Auto-detected'
-      : LANG_NAMES[language] ?? language
+  const langName = LANG_NAMES[language] ?? language
 
   const doSubmit = useCallback(
     async (item) => {
@@ -100,6 +97,8 @@ export default function InputReview() {
         await submitAudioInput(
           item.sessionId,
           item.audioBlob,
+          item.language,
+          item.text,
         )
         return
       }
@@ -198,6 +197,7 @@ export default function InputReview() {
         sessionId,
         doctorId: state.doctorId,
         doctorName,
+        language,
       },
     })
     return null

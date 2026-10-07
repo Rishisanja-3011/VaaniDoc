@@ -1,6 +1,16 @@
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-load_dotenv()
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+PROJECT_DIR = BACKEND_DIR.parent
+
+# Resolve environment files from the project, rather than from the process
+# working directory. This is important when the API is started by a host from
+# outside the repository root.
+load_dotenv(BACKEND_DIR / ".env")
+load_dotenv(PROJECT_DIR / ".env")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

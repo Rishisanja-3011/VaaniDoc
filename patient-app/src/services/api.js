@@ -21,6 +21,7 @@ const DEFAULT_TIMEOUT_MS = 15_000
 // ============================================================
 
 export async function apiFetch(path, options = {}) {
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, ...requestOptions } = options
   // ----------------------------------------------------------
   // Offline check
   // ----------------------------------------------------------
@@ -44,7 +45,7 @@ export async function apiFetch(path, options = {}) {
 
   const timer = setTimeout(() => {
     controller.abort()
-  }, DEFAULT_TIMEOUT_MS)
+  }, timeoutMs)
 
 
   try {
@@ -86,14 +87,11 @@ export async function apiFetch(path, options = {}) {
     const response = await fetch(
       `${BASE}${path}`,
       {
-        ...options,
+        ...requestOptions,
         headers,
         signal: controller.signal,
       }
     )
-
-
-    clearTimeout(timer)
 
 
     // --------------------------------------------------------
@@ -118,7 +116,9 @@ export async function apiFetch(path, options = {}) {
       try {
         data = await response.json()
       } catch {
-        data = null
+        if (response.ok) {
+          throw new Error('The server returned an invalid JSON response. Please try again.')
+        }
       }
     } else {
       try {
@@ -160,6 +160,9 @@ export async function apiFetch(path, options = {}) {
     }
 
 
+    if (response.ok && (data === null || typeof data !== 'object')) {
+      throw new Error('The server returned an invalid response. Please try again.')
+    }
     return data
 
   } catch (error) {
@@ -179,6 +182,8 @@ export async function apiFetch(path, options = {}) {
 
 
     throw error
+  } finally {
+    clearTimeout(timer)
   }
 }
 

@@ -7,6 +7,7 @@ from fastapi import (
     status,
     BackgroundTasks,
     File,
+    Form,
     UploadFile,
 )
 
@@ -26,6 +27,7 @@ from app.services.session_service import (
     save_patient_input,
     update_session_status,
 )
+from app.services.language import normalize_language
 
 
 def _auto_process_session(session_id: str):
@@ -272,13 +274,20 @@ async def submit_patient_input(
             ),
         )
 
+    language = normalize_language(request.language, fallback=None)
+    if language is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported patient language.",
+        )
+
     try:
         saved_input = save_patient_input(
             session_id,
             {
                 "type": "text",
                 "text": request.text,
-                "language": request.language,
+                "language": language,
             },
         )
 
@@ -329,6 +338,8 @@ async def submit_patient_audio(
     session_id: str,
     background_tasks: BackgroundTasks,
     audio: UploadFile = File(...),
+    language: str | None = Form(default=None),
+    transcript: str | None = Form(default=None),
 ):
     """
     Receive patient voice recording.
@@ -439,27 +450,29 @@ async def submit_patient_audio(
             transcribe_patient_audio,
         )
 
-        print("")
-        print("STARTING GEMINI TRANSCRIPTION...")
+        preferred_language = normalize_language(language, fallback=None)
 
-        transcript_data = (
-            transcribe_patient_audio(
+        browser_transcript = (transcript or "").strip()
+        if browser_transcript:
+            # Browser recognition is the existing reviewed-transcript path.
+            # Gemini remains the fallback when browser recognition is absent.
+            transcript_data = {
+                "transcript": browser_transcript,
+                "language": preferred_language,
+            }
+        else:
+            transcript_data = await asyncio.to_thread(
+                transcribe_patient_audio,
                 audio_bytes=audio_bytes,
                 mime_type=mime_type,
+                preferred_language=preferred_language,
             )
-        )
 
         print("GEMINI TRANSCRIPTION SUCCESS")
         print(
             "DETECTED LANGUAGE:",
             transcript_data.get(
                 "language"
-            ),
-        )
-        print(
-            "TRANSCRIPT:",
-            transcript_data.get(
-                "transcript"
             ),
         )
 
@@ -502,11 +515,16 @@ async def submit_patient_audio(
         .strip()
     )
 
-    language = (
+    detected_language = (
         transcript_data
         .get("language", "")
         .strip()
         .lower()
+    )
+
+    language = normalize_language(
+        detected_language,
+        fallback=normalize_language(language, fallback=None),
     )
 
     if not transcript:
@@ -521,10 +539,7 @@ async def submit_patient_audio(
     if not language:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=(
-                "Gemini did not detect "
-                "the patient language."
-            ),
+            detail="Gemini did not return a supported patient language.",
         )
 
     # --------------------------------------------------------
@@ -548,19 +563,9 @@ async def submit_patient_audio(
             ),
         }
 
-        print(
-            "INPUT DATA:",
-            input_data,
-        )
-
         saved_input = save_patient_input(
             session_id,
             input_data,
-        )
-
-        print(
-            "SAVE RESULT:",
-            saved_input,
         )
 
         if saved_input is None:

@@ -6,6 +6,7 @@ from supabase import Client, create_client
 
 
 BASE_DIR = Path(__file__).resolve().parents[3]
+load_dotenv(BASE_DIR / "backend" / ".env")
 load_dotenv(BASE_DIR / ".env")
 
 
