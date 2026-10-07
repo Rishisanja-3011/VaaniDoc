@@ -543,7 +543,17 @@ IMPORTANT:
     except AIProcessingError:
         raise
 
-    except Exception:
+    except Exception as exc:
+        # Log provider failures without logging the API key or patient input.
+        print("GEMINI TEXT PROCESSING ERROR")
+        print("ERROR TYPE:", type(exc).__name__)
+        error_message = str(exc)
+        if api_key:
+            error_message = error_message.replace(api_key, "[REDACTED]")
+        if text:
+            error_message = error_message.replace(text, "[REDACTED]")
+        print("ERROR:", error_message)
+
         # Preserve demo resilience for clinical processing.
         return generate_demo_fallback_intake(
             text,
