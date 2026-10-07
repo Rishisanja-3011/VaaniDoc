@@ -144,8 +144,19 @@ async def process_text(
     "/session/{session_id}",
     response_model=ClinicalIntake,
 )
-async def process_session(
+async def process_session(session_id: str):
+    return await _process_session(session_id)
+
+
+async def process_claimed_session(session_id: str):
+    """Process input for an audio request that already claimed its session."""
+    return await _process_session(session_id, already_claimed=True)
+
+
+async def _process_session(
     session_id: str,
+    *,
+    already_claimed: bool = False,
 ):
     """
     Process the latest patient input for a consultation session.
@@ -229,7 +240,7 @@ async def process_session(
         except Exception:
             pass
 
-        if session["status"] == "processing":
+        if session["status"] == "processing" and not already_claimed:
             raise HTTPException(
                 status_code=409,
                 detail="Clinical intake is already being prepared.",
@@ -327,15 +338,16 @@ async def process_session(
 
     try:
 
-        processing_session = update_session_status(
-            session_id,
-            "processing",
-        )
-
-        if processing_session is None:
-            raise RuntimeError(
-                "Failed to update session status to processing."
+        if session["status"] != "processing":
+            processing_session = update_session_status(
+                session_id,
+                "processing",
             )
+
+            if processing_session is None:
+                raise RuntimeError(
+                    "Failed to update session status to processing."
+                )
 
         # ----------------------------------------------------
         # 6. RUN AI

@@ -24,24 +24,28 @@ from app.services.session_service import (
     get_session,
     get_session_input,
     get_session_intake,
+    claim_session_for_processing,
     save_patient_input,
     update_session_status,
 )
 from app.services.language import normalize_language
 
 
-def _auto_process_session(session_id: str):
+def _auto_process_session(session_id: str, already_claimed: bool = False):
     """
     Background task to execute session AI intake processing
     automatically after receiving patient input.
     """
 
     try:
-        from app.api.processing import process_session
+        if already_claimed:
+            from app.api.processing import process_claimed_session
 
-        asyncio.run(
-            process_session(session_id)
-        )
+            asyncio.run(process_claimed_session(session_id))
+        else:
+            from app.api.processing import process_session
+
+            asyncio.run(process_session(session_id))
 
     except Exception as exc:
         err_msg = (
@@ -54,6 +58,15 @@ def _auto_process_session(session_id: str):
             f"[BACKGROUND AI ERROR] "
             f"Session {session_id}: {err_msg}"
         )
+
+
+def _restore_audio_session_to_waiting(session_id: str) -> None:
+    try:
+        session = get_session(session_id)
+        if session and session["status"] == "processing":
+            update_session_status(session_id, "waiting")
+    except Exception as exc:
+        print(f"[AUDIO SESSION RECOVERY ERROR] {session_id}: {exc}")
 
 
 router = APIRouter(
@@ -386,6 +399,13 @@ async def submit_patient_audio(
         session.get("status"),
     )
 
+    if session["status"] in {"processing", "ready", "active"}:
+        return {
+            "session_id": session_id,
+            "status": session["status"],
+            "already_received": True,
+        }
+
     if session["status"] != "waiting":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -440,6 +460,22 @@ async def submit_patient_audio(
             detail="Audio recording is empty.",
         )
 
+    claimed_session = claim_session_for_processing(session_id)
+    if claimed_session is None:
+        current_session = get_session(session_id)
+        if current_session and current_session["status"] in {
+            "processing", "ready", "active"
+        }:
+            return {
+                "session_id": session_id,
+                "status": current_session["status"],
+                "already_received": True,
+            }
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This session cannot accept another submission.",
+        )
+
     # --------------------------------------------------------
     # GEMINI TRANSCRIPTION
     # --------------------------------------------------------
@@ -484,6 +520,7 @@ async def submit_patient_audio(
         print("ERROR:", str(exc))
         print("========================================")
 
+        _restore_audio_session_to_waiting(session_id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
@@ -497,6 +534,7 @@ async def submit_patient_audio(
         print("ERROR:", str(exc))
         print("========================================")
 
+        _restore_audio_session_to_waiting(session_id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=(
@@ -528,6 +566,7 @@ async def submit_patient_audio(
     )
 
     if not transcript:
+        _restore_audio_session_to_waiting(session_id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=(
@@ -537,6 +576,7 @@ async def submit_patient_audio(
         )
 
     if not language:
+        _restore_audio_session_to_waiting(session_id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Gemini did not return a supported patient language.",
@@ -582,6 +622,7 @@ async def submit_patient_audio(
         print("ERROR:", str(exc))
         print("========================================")
 
+        _restore_audio_session_to_waiting(session_id)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
@@ -597,6 +638,7 @@ async def submit_patient_audio(
         print("ERROR:", str(exc))
         print("========================================")
 
+        _restore_audio_session_to_waiting(session_id)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
@@ -610,6 +652,7 @@ async def submit_patient_audio(
         print("ERROR:", str(exc))
         print("========================================")
 
+        _restore_audio_session_to_waiting(session_id)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
@@ -631,6 +674,7 @@ async def submit_patient_audio(
     background_tasks.add_task(
         _auto_process_session,
         session_id,
+        True,
     )
 
     print("AUDIO REQUEST SUCCESS")
@@ -639,7 +683,7 @@ async def submit_patient_audio(
 
     return {
         "session_id": session_id,
-        "status": "received",
+        "status": "processing",
         "language": language,
         "transcript": transcript,
     }

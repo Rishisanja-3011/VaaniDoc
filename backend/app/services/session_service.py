@@ -311,6 +311,20 @@ def update_session_status(
     return _session_response(session)
 
 
+def claim_session_for_processing(session_id: str) -> dict | None:
+    """Atomically claim a waiting session before slow patient processing."""
+    response = (
+        supabase_admin
+        .table("active_sessions")
+        .update({"status": "processing"})
+        .eq("id", session_id)
+        .eq("status", "waiting")
+        .execute()
+    )
+    session = _first_row(response)
+    return _session_response(session) if session else None
+
+
 # ============================================================
 # SAVE PATIENT INPUT
 # ============================================================

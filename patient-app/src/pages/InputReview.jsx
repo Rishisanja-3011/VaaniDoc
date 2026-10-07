@@ -14,6 +14,7 @@ import {
 import PageShell from '../components/PageShell.jsx'
 import {
   createSession,
+  getPatientSessionStatus,
   getSavedPatientSession,
   savePatientSession,
   submitAudioInput,
@@ -203,6 +204,23 @@ export default function InputReview() {
     return null
   }
 
+  function continueToWaiting(targetSessionId = sessionId) {
+    clearQueue()
+    setSubmitState('sent')
+    savePatientSession({
+      currentPath: `/waiting/${targetSessionId}`,
+      sessionId: targetSessionId,
+      doctorCode,
+      doctorName,
+      doctorId: state.doctorId,
+      reviewData: null,
+    })
+    navigate(`/waiting/${targetSessionId}`, {
+      state: { doctorCode, doctorName },
+      replace: true,
+    })
+  }
+
   async function handleSubmit() {
     if (submittedRef.current) {
       return
@@ -250,6 +268,19 @@ export default function InputReview() {
         })
       }, 500)
     } catch (err) {
+      if (err.timeout) {
+        try {
+          const current = await getPatientSessionStatus(sessionId)
+          if (['processing', 'ready', 'active'].includes(current?.status)) {
+            submittedRef.current = true
+            continueToWaiting()
+            return
+          }
+        } catch {
+          // Keep the timeout message; retry will recheck this same session.
+        }
+      }
+
       submittedRef.current = false
 
       if (err.offline) {
@@ -273,6 +304,28 @@ export default function InputReview() {
 
     if (isInactive && doctorCode) {
       setSubmitState('loading')
+
+      let currentSession = null
+      try {
+        currentSession = await getPatientSessionStatus(sessionId)
+      } catch (statusError) {
+        if (statusError.status !== 404) {
+          setErrorMsg(friendlyApiError(statusError))
+          setSubmitState('failed')
+          return
+        }
+      }
+
+      if (['processing', 'ready', 'active'].includes(currentSession?.status)) {
+        continueToWaiting()
+        return
+      }
+
+      if (currentSession?.status === 'waiting') {
+        setSubmitState('idle')
+        handleSubmit()
+        return
+      }
 
       try {
         const newSession = await createSession(doctorCode)
